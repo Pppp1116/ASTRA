@@ -4,7 +4,7 @@ from astra.comptime import run_comptime
 from astra.parser import parse
 from astra.semantic import analyze
 from astra.ir import lower
-from astra.optimizer import optimize
+from astra.optimizer import optimize, optimize_program
 from astra.codegen import to_python, to_x86_64
 
 CACHE = Path('.astra-cache.json')
@@ -29,6 +29,7 @@ def build(
     prog = parse(src, filename=str(src_file))
     run_comptime(prog, filename=str(src_file))
     analyze(prog, filename=str(src_file), freestanding=freestanding)
+    optimize_program(prog)
     ir = optimize(lower(prog))
     if emit_ir:
         p = Path(emit_ir)

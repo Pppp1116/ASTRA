@@ -425,6 +425,7 @@ def to_x86_64(prog: Program, freestanding: bool = False) -> str:
             raise CodegenError(_diag(item, "async functions are not supported on x86_64 backend"))
         lines.extend(_x86_fn(item, fn_names))
         lines.append("")
+    lines = _optimize_x86_lines(lines)
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -469,6 +470,18 @@ def _label(ctx: _FnCtx, prefix: str) -> str:
     return f".L_{prefix}_{ctx.next_label}"
 
 
+def _x86_cond_jump_false(cond, false_label: str, ctx: _FnCtx) -> list[str]:
+    if isinstance(cond, Binary) and cond.op in {"==", "!=", "<", "<=", ">", ">="}:
+        code = _x86_expr(cond.left, ctx)
+        code += ["  push rax"]
+        code += _x86_expr(cond.right, ctx)
+        code += ["  pop rbx", "  cmp rbx, rax"]
+        inv = {"==": "jne", "!=": "je", "<": "jge", "<=": "jg", ">": "jle", ">=": "jl"}[cond.op]
+        code += [f"  {inv} {false_label}"]
+        return code
+    return _x86_expr(cond, ctx) + ["  cmp rax, 0", f"  je {false_label}"]
+
+
 def _x86_stmt(st, ctx: _FnCtx) -> list[str]:
     if isinstance(st, LetStmt):
         if st.type_name not in {None, "Int"}:
@@ -501,8 +514,7 @@ def _x86_stmt(st, ctx: _FnCtx) -> list[str]:
     if isinstance(st, IfStmt):
         lbl_else = _label(ctx, "if_else")
         lbl_end = _label(ctx, "if_end")
-        code = _x86_expr(st.cond, ctx)
-        code += ["  cmp rax, 0", f"  je {lbl_else}"]
+        code = _x86_cond_jump_false(st.cond, lbl_else, ctx)
         for s in st.then_body:
             code += _x86_stmt(s, ctx)
         code += [f"  jmp {lbl_end}", f"{lbl_else}:"]
@@ -514,8 +526,7 @@ def _x86_stmt(st, ctx: _FnCtx) -> list[str]:
         lbl_begin = _label(ctx, "while_begin")
         lbl_end = _label(ctx, "while_end")
         code = [f"{lbl_begin}:"]
-        code += _x86_expr(st.cond, ctx)
-        code += ["  cmp rax, 0", f"  je {lbl_end}"]
+        code += _x86_cond_jump_false(st.cond, lbl_end, ctx)
         ctx.loop_stack.append((lbl_end, lbl_begin))
         for s in st.body:
             code += _x86_stmt(s, ctx)
@@ -534,8 +545,7 @@ def _x86_stmt(st, ctx: _FnCtx) -> list[str]:
         lbl_end = _label(ctx, "for_end")
         code += [f"{lbl_begin}:"]
         if st.cond is not None:
-            code += _x86_expr(st.cond, ctx)
-            code += ["  cmp rax, 0", f"  je {lbl_end}"]
+            code += _x86_cond_jump_false(st.cond, lbl_end, ctx)
         ctx.loop_stack.append((lbl_end, lbl_cont))
         for s in st.body:
             code += _x86_stmt(s, ctx)
@@ -586,25 +596,27 @@ def _x86_expr(e, ctx: _FnCtx) -> list[str]:
         code = _x86_expr(e.left, ctx)
         code += ["  push rax"]
         code += _x86_expr(e.right, ctx)
-        code += ["  mov rbx, rax", "  pop rax"]
+        code += ["  pop rbx"]
         op = e.op
         if op == "+":
             return code + ["  add rax, rbx"]
         if op == "-":
-            return code + ["  sub rax, rbx"]
+            return code + ["  sub rbx, rax", "  mov rax, rbx"]
         if op == "*":
             return code + ["  imul rax, rbx"]
         if op == "/":
-            return code + ["  cqo", "  idiv rbx"]
+            return code + ["  mov rcx, rax", "  mov rax, rbx", "  cqo", "  idiv rcx"]
         if op == "%":
-            return code + ["  cqo", "  idiv rbx", "  mov rax, rdx"]
+            return code + ["  mov rcx, rax", "  mov rax, rbx", "  cqo", "  idiv rcx", "  mov rax, rdx"]
         if op in {"==", "!=", "<", "<=", ">", ">="}:
             cond = {"==": "sete", "!=": "setne", "<": "setl", "<=": "setle", ">": "setg", ">=": "setge"}[op]
-            return code + ["  cmp rax, rbx", f"  {cond} al", "  movzx rax, al"]
+            return code + ["  cmp rbx, rax", f"  {cond} al", "  movzx rax, al"]
         if op == "&&":
             return code + ["  cmp rax, 0", "  setne al", "  movzx rax, al", "  cmp rbx, 0", "  setne bl", "  and al, bl", "  movzx rax, al"]
         if op == "||":
             return code + ["  cmp rax, 0", "  setne al", "  cmp rbx, 0", "  setne bl", "  or al, bl", "  movzx rax, al"]
+        if op == "??":
+            raise CodegenError(_diag(e, "binary operator ?? is unsupported on x86_64 backend"))
         raise CodegenError(_diag(e, f"binary operator {op} is unsupported on x86_64 backend"))
     if isinstance(e, Call):
         if not isinstance(e.fn, Name):
@@ -624,3 +636,96 @@ def _x86_expr(e, ctx: _FnCtx) -> list[str]:
         code += [f"  call {target_name}"]
         return code
     raise CodegenError(_diag(e, f"{type(e).__name__} is unsupported on x86_64 backend"))
+
+
+def _is_label(line: str) -> bool:
+    s = line.strip()
+    return s.endswith(":") and not s.startswith(";")
+
+
+def _parse_mov(line: str) -> tuple[str, str] | None:
+    s = line.strip()
+    if not s.startswith("mov "):
+        return None
+    rest = s[4:]
+    if "," not in rest:
+        return None
+    dst, src = rest.split(",", 1)
+    return dst.strip(), src.strip()
+
+
+def _remove_unreachable(lines: list[str]) -> list[str]:
+    out: list[str] = []
+    dead = False
+    for line in lines:
+        if _is_label(line):
+            dead = False
+            out.append(line)
+            continue
+        if dead:
+            continue
+        out.append(line)
+        s = line.strip()
+        if s.startswith("jmp ") or s == "ret":
+            dead = True
+    return out
+
+
+def _optimize_x86_lines(lines: list[str]) -> list[str]:
+    cur = _remove_unreachable(lines)
+    for _ in range(5):
+        out: list[str] = []
+        i = 0
+        changed = False
+        while i < len(cur):
+            line = cur[i]
+            mov = _parse_mov(line)
+            if mov and mov[0] == mov[1]:
+                i += 1
+                changed = True
+                continue
+            if i + 1 < len(cur):
+                a = cur[i].strip()
+                b = cur[i + 1].strip()
+                if a == "push rax" and b == "pop rax":
+                    i += 2
+                    changed = True
+                    continue
+            if i + 1 < len(cur):
+                m1 = _parse_mov(cur[i])
+                m2 = _parse_mov(cur[i + 1])
+                if m1 and m2 and m1[0] == "rax" and m2[1] == "rax":
+                    out.append(f"  mov {m2[0]}, {m1[1]}")
+                    i += 2
+                    changed = True
+                    continue
+            if i + 1 < len(cur):
+                m1 = _parse_mov(cur[i])
+                op = cur[i + 1].strip()
+                if m1 and m1[0] == "rax":
+                    applied = False
+                    for inst in ("add", "sub", "imul", "cmp"):
+                        if op == f"{inst} rbx, rax":
+                            out.append(f"  {inst} rbx, {m1[1]}")
+                            i += 2
+                            changed = True
+                            applied = True
+                            break
+                    if applied:
+                        continue
+            if line.strip().startswith("jmp "):
+                target = line.strip().split()[1]
+                j = i + 1
+                while j < len(cur) and not cur[j].strip():
+                    j += 1
+                if j < len(cur) and cur[j].strip() == f"{target}:":
+                    i += 1
+                    changed = True
+                    continue
+            out.append(line)
+            i += 1
+        out = _remove_unreachable(out)
+        cur = out
+        if not changed:
+            break
+    return cur
