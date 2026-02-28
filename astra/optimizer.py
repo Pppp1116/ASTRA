@@ -187,6 +187,9 @@ def _optimize_stmt(st: Any, env: dict[str, Any], mutable_names: set[str]) -> tup
         if _is_discardable_expr(st.expr):
             return None, env, False
         return st, env, False
+    if isinstance(st, DropStmt):
+        st.expr = _fold_ast_expr(st.expr, env, mutable_names)
+        return st, env, False
     if isinstance(st, ReturnStmt):
         if st.expr is not None:
             st.expr = _fold_ast_expr(st.expr, env, mutable_names)
@@ -534,6 +537,10 @@ def _dse_stmts(stmts: list[Any], live_out: set[str]) -> tuple[list[Any], set[str
         if isinstance(st, ExprStmt):
             if _is_discardable_expr(st.expr):
                 continue
+            out_rev.append(st)
+            live |= _used_names_expr(st.expr)
+            continue
+        if isinstance(st, DropStmt):
             out_rev.append(st)
             live |= _used_names_expr(st.expr)
             continue

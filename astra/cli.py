@@ -54,7 +54,7 @@ def main(argv=None):
     b = sp.add_parser("build")
     b.add_argument("input")
     b.add_argument("-o", "--output", required=True)
-    b.add_argument("--target", choices=["py", "x86_64"], default="py")
+    b.add_argument("--target", choices=["py", "x86_64", "native"], default="py")
     b.add_argument("--emit-ir")
     b.add_argument("--strict", action="store_true")
     b.add_argument("--freestanding", action="store_true")

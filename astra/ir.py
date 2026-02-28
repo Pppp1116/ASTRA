@@ -29,7 +29,7 @@ def lower(prog: Program) -> IR:
 
 
 def validate(ir: IR):
-    valid_heads = {"let", "assign", "ret", "expr", "if", "while", "for", "match"}
+    valid_heads = {"let", "assign", "ret", "expr", "drop", "if", "while", "for", "match"}
     for fn in ir.funcs:
         for op in fn.ops:
             if not isinstance(op, tuple) or not op:
@@ -47,6 +47,8 @@ def _stmt(st):
         return [("ret", _expr(st.expr) if st.expr else None)]
     if isinstance(st, ExprStmt):
         return [("expr", _expr(st.expr))]
+    if isinstance(st, DropStmt):
+        return [("drop", _expr(st.expr))]
     if isinstance(st, IfStmt):
         then_ops = []
         for x in st.then_body:
@@ -82,7 +84,7 @@ def _expr(e):
     if isinstance(e, BoolLit):
         return ("lit", e.value)
     if isinstance(e, NilLit):
-        return ("nil",)
+        return ("none",)
     if isinstance(e, Literal):
         return ("lit", e.value)
     if isinstance(e, Name):

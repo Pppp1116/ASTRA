@@ -277,14 +277,15 @@ class Parser:
         return TypeAliasDecl(name, generics, target, tok.pos, tok.line, tok.col)
 
     def parse_type(self) -> str:
+        typ: str
         if self.opt("&"):
             mut = "mut " if self.opt("mut") else ""
-            return f"&{mut}{self.parse_type()}"
-        if self.opt("["):
+            typ = f"&{mut}{self.parse_type()}"
+        elif self.opt("["):
             inner = self.parse_type()
             self.eat("]")
-            return f"[{inner}]"
-        if self.opt("fn"):
+            typ = f"[{inner}]"
+        elif self.opt("fn"):
             self.eat("(")
             args: list[str] = []
             if self.cur().kind != ")":
@@ -293,15 +294,19 @@ class Parser:
                     args.append(self.parse_type())
             self.eat(")")
             self.eat("->")
-            return f"fn({', '.join(args)}) -> {self.parse_type()}"
-        name = self.eat("IDENT").text
-        if self.opt("<"):
-            args = [self.parse_type()]
-            while self.opt(","):
-                args.append(self.parse_type())
-            self.eat(">")
-            return f"{name}<{', '.join(args)}>"
-        return name
+            typ = f"fn({', '.join(args)}) -> {self.parse_type()}"
+        else:
+            name = self.eat("IDENT").text
+            typ = name
+            if self.opt("<"):
+                args = [self.parse_type()]
+                while self.opt(","):
+                    args.append(self.parse_type())
+                self.eat(">")
+                typ = f"{name}<{', '.join(args)}>"
+        while self.opt("?"):
+            typ = f"Option<{typ}>"
+        return typ
 
     def parse_block(self) -> list[Any]:
         self.eat("{")
@@ -352,6 +357,10 @@ class Parser:
             e = self.parse_expr()
             self.eat(";")
             return DeferStmt(e, tok.pos, tok.line, tok.col)
+        if self.opt("drop"):
+            e = self.parse_expr()
+            self.eat(";")
+            return DropStmt(e, tok.pos, tok.line, tok.col)
         if self.opt("comptime"):
             body = self.parse_block()
             return ComptimeStmt(body, tok.pos, tok.line, tok.col)
@@ -441,8 +450,11 @@ class Parser:
             return AwaitExpr(self.parse_unary(), tok.pos, tok.line, tok.col)
         if self.cur().kind in {"-", "!", "~", "&", "*"}:
             tok = self.eat(self.cur().kind)
+            op = tok.kind
+            if op == "&" and self.opt("mut"):
+                op = "&mut"
             expr = self.parse_unary()
-            return Unary(tok.kind, expr, tok.pos, tok.line, tok.col)
+            return Unary(op, expr, tok.pos, tok.line, tok.col)
         return self.parse_postfix()
 
     def parse_postfix(self):
@@ -481,7 +493,7 @@ class Parser:
             return Literal(tok.text, tok.pos, tok.line, tok.col)
         if self.opt("BOOL"):
             return BoolLit(tok.text == "true", tok.pos, tok.line, tok.col)
-        if self.opt("nil"):
+        if self.opt("none"):
             return NilLit(tok.pos, tok.line, tok.col)
         if self.opt("IDENT"):
             return Name(tok.text, tok.pos, tok.line, tok.col)

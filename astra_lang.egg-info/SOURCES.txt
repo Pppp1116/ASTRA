@@ -2,6 +2,7 @@ README.md
 pyproject.toml
 astra/__init__.py
 astra/__main__.py
+astra/asm_assert.py
 astra/ast.py
 astra/build.py
 astra/cli.py
@@ -40,5 +41,7 @@ tests/test_parser.py
 tests/test_pkg.py
 tests/test_property_fuzz.py
 tests/test_semantic.py
+tests/test_stdlib_modules.py
 tests/test_tooling_inprocess.py
 tests/test_tools.py
+tests/test_x86_assembly_verification.py

@@ -1,0 +1,14 @@
+pub enum Option<T> {
+  None,
+  Some(T),
+}
+
+pub enum Result<T, E> {
+  Ok(T),
+  Err(E),
+}
+
+pub struct Vec<T> {
+}
+
+type Bytes = Vec<u8>;

@@ -1,4 +1,11 @@
-fn read(path String) -> String { return read_file(path); }
-fn write(path String, data String) -> Int { return write_file(path, data); }
-fn exists(path String) -> Bool { return __file_exists(path); }
-fn remove(path String) -> Int { return __file_remove(path); }
+fn read(path: String) -> String { return read_file(path); }
+fn write(path: String, data: String) -> Int { return write_file(path, data); }
+fn exists(path: String) -> Bool { return __file_exists(path); }
+fn remove(path: String) -> Int { return __file_remove(path); }
+fn read_or(path: String, fallback: String) -> String {
+  let text = read(path);
+  if len(text) == 0 {
+    return fallback;
+  }
+  return text;
+}

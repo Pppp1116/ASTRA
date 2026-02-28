@@ -181,6 +181,9 @@ class _Evaluator:
         if isinstance(st, ExprStmt):
             self.eval_expr(st.expr, env)
             return None
+        if isinstance(st, DropStmt):
+            self.eval_expr(st.expr, env)
+            return None
         if isinstance(st, ReturnStmt):
             v = None if st.expr is None else self.eval_expr(st.expr, env)
             return _LoopSignal("return", v)

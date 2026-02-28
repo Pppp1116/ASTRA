@@ -5,6 +5,7 @@ from astra.ast import (
     BreakStmt,
     ContinueStmt,
     DeferStmt,
+    DropStmt,
     EnumDecl,
     ExternFnDecl,
     FieldExpr,
@@ -14,9 +15,11 @@ from astra.ast import (
     IndexExpr,
     LetStmt,
     StructDecl,
+    TypeAliasDecl,
     Unary,
 )
 from astra.parser import ParseError, parse
+from astra.semantic import SemanticError, analyze
 
 
 def test_precedence_and_unary_and_chained_postfix():
@@ -94,20 +97,59 @@ fn main() -> Int { return add(1, 2); }
     assert fn.params == [("a", "Int"), ("b", "Int")]
 
 
+def test_parse_option_type_sugar():
+    src = "fn maybe(x: Int?) -> Int? { let y: Int? = none; return y; } fn main() -> Int { return 0; }"
+    prog = parse(src)
+    fn = prog.items[0]
+    assert fn.params == [("x", "Option<Int>")]
+    assert fn.ret == "Option<Int>"
+
+
+def test_parse_owned_and_borrowed_text_buffer_types():
+    src = """
+type Bytes = Vec<u8>;
+fn view(s: &str, b: Bytes, xs: Vec<i16>, sl: &[u8]) -> Void { return; }
+"""
+    prog = parse(src)
+    assert isinstance(prog.items[0], TypeAliasDecl)
+    fn = prog.items[1]
+    assert isinstance(fn, FnDecl)
+    assert fn.params == [("s", "&str"), ("b", "Bytes"), ("xs", "Vec<i16>"), ("sl", "&[u8]")]
+    assert fn.ret == "Void"
+
+
 def test_parse_defer_and_coalesce():
     src = """
 fn main() -> Int {
   defer print("done");
-  let x = nil ?? 7;
-  return x;
+  let x: Option<Int> = none;
+  let y = x ?? 7;
+  return y;
 }
 """
     prog = parse(src)
     fn = prog.items[0]
     assert isinstance(fn.body[0], DeferStmt)
     assert isinstance(fn.body[1], LetStmt)
-    assert isinstance(fn.body[1].expr, Binary)
-    assert fn.body[1].expr.op == "??"
+    assert isinstance(fn.body[2], LetStmt)
+    assert isinstance(fn.body[2].expr, Binary)
+    assert fn.body[2].expr.op == "??"
+
+
+def test_parse_drop_stmt():
+    src = "fn main() -> Int { drop print(1); return 0; }"
+    prog = parse(src)
+    fn = prog.items[0]
+    assert isinstance(fn.body[0], DropStmt)
+
+
+def test_parse_mutable_borrow_unary_expression():
+    src = "fn main() -> Int { let mut x = 1; let r = &mut x; return 0; }"
+    prog = parse(src)
+    fn = prog.items[0]
+    assert isinstance(fn.body[1], LetStmt)
+    assert isinstance(fn.body[1].expr, Unary)
+    assert fn.body[1].expr.op == "&mut"
 
 
 def test_parse_impl_fn_specializations():
@@ -136,3 +178,11 @@ def test_multi_error_recovery_collects_multiple():
         lines = str(e).splitlines()
         assert len(lines) >= 2
         assert any(line.startswith("PARSE") for line in lines)
+
+
+def test_nil_keyword_is_rejected():
+    try:
+        analyze(parse("fn main() -> Int { let x = nil; return 0; }"))
+        assert False
+    except SemanticError as e:
+        assert "undefined name nil" in str(e)

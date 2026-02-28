@@ -9,7 +9,7 @@ def _fmt_expr(e) -> str:
     if isinstance(e, BoolLit):
         return "true" if e.value else "false"
     if isinstance(e, NilLit):
-        return "nil"
+        return "none"
     if isinstance(e, Literal):
         if isinstance(e.value, str):
             return repr(e.value).replace("'", '"')
@@ -52,6 +52,8 @@ def _fmt_stmt(st, ind: int) -> list[str]:
         return [f"{p}continue;"]
     if isinstance(st, ExprStmt):
         return [f"{p}{_fmt_expr(st.expr)};"]
+    if isinstance(st, DropStmt):
+        return [f"{p}drop {_fmt_expr(st.expr)};"]
     if isinstance(st, IfStmt):
         out = [f"{p}if {_fmt_expr(st.cond)} {{"]
         for s in st.then_body:

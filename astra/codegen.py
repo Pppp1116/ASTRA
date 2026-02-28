@@ -37,7 +37,7 @@ def to_python(prog: Program, freestanding: bool = False) -> str:
         "_astra_sockets = {}",
         "_astra_next_sock = 1",
         "_astra_libs = {}",
-        "def print_(x): print(x); return 0",
+        "def print_(x): print(x); return None",
         "def len_(x): return len(x)",
         "def read_file(p): return pathlib.Path(p).read_text()",
         "def write_file(p,s): pathlib.Path(p).write_text(str(s)); return 0",
@@ -51,7 +51,7 @@ def to_python(prog: Program, freestanding: bool = False) -> str:
         "    return ptr",
         "def free(ptr):",
         "    _astra_heap.pop(ptr, None)",
-        "    return 0",
+        "    return None",
         "def spawn(fn, *a):",
         "    global _astra_next_tid",
         "    tid = _astra_next_tid",
@@ -123,7 +123,7 @@ def to_python(prog: Program, freestanding: bool = False) -> str:
         "def from_json(s): return json.loads(s)",
         "def sha256(s): return hashlib.sha256(str(s).encode()).hexdigest()",
         "def hmac_sha256(k, s): return hmac.new(str(k).encode(), str(s).encode(), hashlib.sha256).hexdigest()",
-        "def proc_exit(code): return int(code)",
+        "def proc_exit(code): raise SystemExit(int(code))",
         "def env_get(k): return os.environ.get(str(k), '')",
         "def cwd(): return os.getcwd()",
         "def proc_run(cmd): return subprocess.call(str(cmd), shell=True)",
@@ -285,8 +285,7 @@ def _expr(e):
         return f"({e.op}{_expr(e.expr)})"
     if isinstance(e, Binary):
         if e.op == "??":
-            left = _expr(e.left)
-            return f"({left} if {left} is not None else {_expr(e.right)})"
+            return f"((lambda __v: __v if __v is not None else {_expr(e.right)})({_expr(e.left)}))"
         op = BIN_OP_MAP.get(e.op, e.op)
         return f"({_expr(e.left)} {op} {_expr(e.right)})"
     if isinstance(e, Call):
@@ -329,6 +328,10 @@ def _stmt_py(st, ind):
     if isinstance(st, ComptimeStmt):
         return []
     if isinstance(st, ExprStmt):
+        return [f"{p}{_expr(st.expr)}"]
+    if isinstance(st, DropStmt):
+        if getattr(st, "drop_free", False) and isinstance(st.expr, Name):
+            return [f"{p}free({st.expr.value})"]
         return [f"{p}{_expr(st.expr)}"]
     if isinstance(st, IfStmt):
         lines = [f"{p}if {_expr(st.cond)}:"]
@@ -510,6 +513,8 @@ def _x86_stmt(st, ctx: _FnCtx) -> list[str]:
             return ["  xor rax, rax", f"  jmp {ctx.epilogue}"]
         return _x86_expr(st.expr, ctx) + [f"  jmp {ctx.epilogue}"]
     if isinstance(st, ExprStmt):
+        return _x86_expr(st.expr, ctx)
+    if isinstance(st, DropStmt):
         return _x86_expr(st.expr, ctx)
     if isinstance(st, IfStmt):
         lbl_else = _label(ctx, "if_else")

@@ -1,16 +1,43 @@
-import hashlib, json
+import hashlib
+import json
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
+
 from astra.comptime import run_comptime
-from astra.parser import parse
-from astra.semantic import analyze
+from astra.codegen import to_python, to_x86_64
 from astra.ir import lower
 from astra.optimizer import optimize, optimize_program
-from astra.codegen import to_python, to_x86_64
+from astra.parser import parse
+from astra.semantic import analyze
 
 CACHE = Path('.astra-cache.json')
 
 def _hash(content: str) -> str:
     return hashlib.sha256(content.encode()).hexdigest()
+
+
+def _build_native_x86_64(asm: str, out_path: str, src_file: Path):
+    nasm = shutil.which("nasm")
+    ld = shutil.which("ld")
+    if nasm is None or ld is None:
+        raise RuntimeError(f"CODEGEN {src_file}:1:1: native target requires `nasm` and `ld` in PATH")
+    out = Path(out_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="astra-native-") as td:
+        asm_path = Path(td) / "module.s"
+        obj_path = Path(td) / "module.o"
+        asm_path.write_text(asm)
+        cp = subprocess.run([nasm, "-felf64", str(asm_path), "-o", str(obj_path)], capture_output=True, text=True)
+        if cp.returncode != 0:
+            detail = (cp.stderr or cp.stdout or "").strip()
+            raise RuntimeError(f"CODEGEN {src_file}:1:1: nasm failed{': ' + detail if detail else ''}")
+        cp = subprocess.run([ld, str(obj_path), "-o", str(out)], capture_output=True, text=True)
+        if cp.returncode != 0:
+            detail = (cp.stderr or cp.stdout or "").strip()
+            raise RuntimeError(f"CODEGEN {src_file}:1:1: ld failed{': ' + detail if detail else ''}")
+    out.chmod(out.stat().st_mode | 0o111)
 
 def build(
     src_path: str,
@@ -35,11 +62,23 @@ def build(
         p = Path(emit_ir)
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(json.dumps([{"name": f.name, "ops": f.ops} for f in ir.funcs], indent=2))
-    out = to_python(prog, freestanding=freestanding) if target == 'py' else to_x86_64(prog, freestanding=freestanding)
-    if strict and "pass\n" in out:
-        raise RuntimeError(f"CODEGEN {src_file}:1:1: strict mode rejected generated placeholder code")
-    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
-    Path(out_path).write_text(out)
+    if target == "py":
+        out = to_python(prog, freestanding=freestanding)
+        if strict and "pass\n" in out:
+            raise RuntimeError(f"CODEGEN {src_file}:1:1: strict mode rejected generated placeholder code")
+        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(out_path).write_text(out)
+    elif target == "x86_64":
+        out = to_x86_64(prog, freestanding=freestanding)
+        if strict and "pass\n" in out:
+            raise RuntimeError(f"CODEGEN {src_file}:1:1: strict mode rejected generated placeholder code")
+        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(out_path).write_text(out)
+    elif target == "native":
+        asm = to_x86_64(prog, freestanding=freestanding)
+        _build_native_x86_64(asm, out_path, src_file)
+    else:
+        raise RuntimeError(f"BUILD {src_file}:1:1: unsupported target {target}")
     cache[src_path] = digest
     CACHE.write_text(json.dumps(dict(sorted(cache.items())), indent=2))
     return 'built'

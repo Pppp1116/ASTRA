@@ -10,24 +10,35 @@ fn_decl   = ["pub"] ["async"] "fn" ident ["<" ident {"," ident} ">"] "(" [param 
 impl_fn   = ["pub"] "impl" ["async"] "fn" ident ["<" ident {"," ident} ">"] "(" [param {"," param}] [","] ")" "->" type block ;
 extern_fn = ["unsafe"] "extern" string "fn" ident "(" [param {"," param}] ")" "->" type ";" ;
 param     = ident ":" type ;
-type      = ident
-         | "&" ["mut"] type
-         | "[" type "]"
-         | "fn" "(" [type {"," type}] ")" "->" type
-         | ident "<" type {"," type} ">" ;
+type      = postfix_type ;
+postfix_type = primary_type ["?"] ;
+primary_type = ident ["<" type {"," type} ">"]
+             | "&" ["mut"] type
+             | "[" type "]"
+             | "fn" "(" [type {"," type}] ")" "->" type
+             | "(" type ")" ;
 block     = "{" { stmt } "}" ;
-stmt      = let_stmt | fixed_stmt | comptime_stmt | defer_stmt | return_stmt | if_stmt | while_stmt | for_stmt | match_stmt | assign_stmt | expr ";" ;
+stmt      = let_stmt | fixed_stmt | comptime_stmt | defer_stmt | drop_stmt | return_stmt | if_stmt | while_stmt | for_stmt | match_stmt | assign_stmt | expr ";" ;
 comptime_stmt = "comptime" block ;
 let_stmt  = "let" ["mut"] ident [":" type] "=" expr ";" ;
 fixed_stmt = "fixed" ident [":" type] "=" expr ";" ;
 defer_stmt = "defer" expr ";" ;
+drop_stmt = "drop" expr ";" ;
 return_stmt = "return" [expr] ";" ;
 if_stmt   = "if" expr block ["else" block] ;
 while_stmt = "while" expr block ;
 for_stmt  = "for" (ident "in" expr | [let_stmt | fixed_stmt | expr ";"] [expr] ";" [assign_stmt | expr]) block ;
 assign_stmt = expr ("=" | "+=" | "-=" | "*=" | "/=" | "%=") expr ";" ;
-expr      = ["await"] atom { op atom } ;
-atom      = int | string | ident ["(" [expr {"," expr}] ")"] | "(" expr ")" ;
+expr      = coalesce_expr ;
+coalesce_expr = logic_or_expr ["??" coalesce_expr] ;
+logic_or_expr = logic_and_expr { "||" logic_and_expr } ;
+logic_and_expr = compare_expr { "&&" compare_expr } ;
+compare_expr = add_expr { ("==" | "!=" | "<" | "<=" | ">" | ">=") add_expr } ;
+add_expr  = mul_expr { ("+" | "-") mul_expr } ;
+mul_expr  = unary_expr { ("*" | "/" | "%") unary_expr } ;
+unary_expr = ["await"] ( ("-" | "!" | "*" | "&" ["mut"]) unary_expr | postfix_expr ) ;
+postfix_expr = atom { "." ident | "[" expr "]" | "(" [expr {"," expr}] ")" } ;
+atom      = int | string | "none" | ident | "(" expr ")" ;
 ```
 
 Conventions:
@@ -44,11 +55,54 @@ Conventions:
 - Ownership-first model for user data.
 - Borrowed references are immutable unless uniquely owned.
 - Runtime backend uses deterministic reference counting for managed objects.
+- Core owned/borrowed buffers:
+  - `String`: owned UTF-8 text (stdlib core type).
+  - `str`: unsized UTF-8 text DST (typically as `&str`).
+  - `Vec<T>`: owned, heap-backed growable sequence (stdlib core type; conceptually ptr/len/cap handle).
+  - `[T]`: unsized slice DST (typically as `&[T]` or `&mut [T]`).
+  - `Bytes`: alias of `Vec<u8>`.
+- Borrowing `Vec<T>` yields slice views (`&[T]`, `&mut [T]`).
 
 ## Type system
-- Nominal primitive types: `Int`, `Float`, `String`, `Bool`, `Any`, `Nil`, `Void`.
+- Nominal primitive types: `Int`, `Float`, `Bool`, `Any`, `Void`, `Never`.
 - Fixed-width integer aliases: `i8`, `u8`, `i16`, `u16`, `i32`, `u32`, `i64`, `u64`, `i128`, `u128`, `isize`, `usize`.
+- Built-in generic sums: `Option<T>` and `Result<T, E>`.
+- Stdlib core owned types: `String`, `Vec<T>`.
+- Built-in bytes alias: `Bytes = Vec<u8>`.
+- Built-in unsized DSTs: `str`, `[T]`.
 - Parametric generics on function declarations (`fn id<T>(x T) -> T`).
+- `T?` is syntax sugar for `Option<T>`.
+- `none` has no standalone type; it is valid only where `Option<T>` is expected.
+- `a ?? b` requires `a: Option<T>` and `b: T`, producing `T`.
+- `??` is short-circuiting: the right operand is evaluated only when the left operand is `none`.
+- `Option<T>` models absence/presence; `Result<T, E>` models recoverable failures with error information.
+- `Never` is coercible to any type `T` (including `Void`).
+- In type joins, `Never` acts as bottom: `join(Never, T) = T` and `join(Never, Never) = Never`.
+- Bare expression statements must have type `Void` or `Never`.
+- `drop expr;` consumes the value and runs its destructor immediately.
+- Use `let _ = expr;` (or `_ = expr;`) to ignore/discard expression results.
+- `return;` is valid only in functions returning `Void`.
+- Unsized rules:
+  - `str` is unsized; use behind references/pointers (for now typically `&str`).
+  - `[T]` is unsized; use behind references/pointers (for now typically `&[T]` / `&mut [T]`).
+  - Plain by-value slice usage like `[Int]` parameters is rejected in safe surface syntax.
+- Lifetime elision model:
+  - References have lifetimes, inferred/elided in current surface syntax.
+  - Input reference parameters start with distinct inferred lifetimes unless constrained.
+  - Returning a reference requires tying the return lifetime to at least one input reference.
+  - Example accepted: `fn first(xs: &[Int]) -> &Int`
+  - Example rejected: `fn bad() -> &Int`
+- Move/copy baseline:
+  - Assignment, argument passing, and return are move-by-default.
+  - Copy-by-default set is currently scalar numerics, `Float`, `Bool`, and shared references (`&T`).
+  - Other values are move-only unless later declared copyable.
+- String literal model:
+  - String literals conceptually type as `&'static str` (lifetime syntax currently elided in source).
+- Indexing rules:
+  - `Vec<T>`, `Bytes`, and slice views index with `Int` and yield `T` (or `u8` for `Bytes`).
+  - `index` operations are bounds-checked and trap/panic on out-of-bounds in safe code.
+  - `get(i)`-style APIs return `Option<T>` (`T?`) for non-trapping lookup.
+  - Direct indexing of `String`/`str` is rejected (UTF-8 text must be handled through byte/char APIs).
 - Safety guarantees: undefined identifiers rejected; arity/type mismatches rejected in semantic pass.
 
 ## Concurrency model
@@ -67,7 +121,7 @@ Conventions:
 
 ## Intentional differences from Rust
 - `defer expr;` schedules cleanup/action at scope exit with straightforward control-flow semantics.
-- `a ?? b` provides null-coalescing without verbose pattern matching for common optional fallback paths.
+- `a ?? b` is defined over `Option<T>` instead of a null type.
 - `impl fn` supports compile-time specialization with most-specific implementation selection.
 - `comptime { ... }` executes deterministic, pure code during compilation.
 - Freestanding mode (`--freestanding`) allows hosted-runtime-free compilation flows for kernels/boot/runtime code.

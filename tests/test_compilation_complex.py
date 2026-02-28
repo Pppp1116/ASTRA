@@ -2,6 +2,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from astra.asm_assert import assert_valid_x86_64_assembly
 from astra.build import build
 
 
@@ -60,6 +61,7 @@ fn main() -> Int {
     )
     build(str(src), str(out), "x86_64")
     asm = out.read_text()
+    assert_valid_x86_64_assembly(asm, workdir=tmp_path)
     assert "call calc" in asm
     assert "while_begin" in asm
     # Comparison in loop condition should use direct branch lowering.
@@ -86,6 +88,7 @@ fn main() -> Int {
     )
     build(str(src), str(out), "x86_64")
     asm = out.read_text()
+    assert_valid_x86_64_assembly(asm, workdir=tmp_path)
     assert "cmp rbx, rax" in asm
     assert "jge" in asm
     assert "setl al" not in asm
@@ -109,6 +112,7 @@ fn main() -> Int {
     )
     build(str(src), str(out), "x86_64")
     asm = out.read_text()
+    assert_valid_x86_64_assembly(asm, workdir=tmp_path)
     assert "if_else" not in asm
     assert "if_end" not in asm
 
@@ -127,6 +131,7 @@ fn main() -> Int {
     )
     build(str(src), str(out), "x86_64")
     asm = out.read_text()
+    assert_valid_x86_64_assembly(asm, workdir=tmp_path)
     assert "imul" not in asm
     assert "add rax" not in asm
 

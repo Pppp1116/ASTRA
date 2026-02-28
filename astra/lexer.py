@@ -24,8 +24,9 @@ KEYWORDS = {
     "impl",
     "match",
     "defer",
+    "drop",
     "comptime",
-    "nil",
+    "none",
     "in",
     "as",
 }
@@ -54,7 +55,7 @@ MULTI_TOKENS = [
     "..",
 ]
 
-SINGLE_TOKENS = set("{}()<>;,=+-*/%![]:.&|^~@")
+SINGLE_TOKENS = set("{}()<>;,=+-*/%!?[]:.&|^~@")
 
 
 @dataclass

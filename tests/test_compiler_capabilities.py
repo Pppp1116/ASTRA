@@ -2,6 +2,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from astra.asm_assert import assert_valid_x86_64_assembly
 from astra.build import build
 from astra.codegen import CodegenError, to_python, to_x86_64
 from astra.parser import parse
@@ -37,7 +38,8 @@ def test_python_codegen_freestanding_has_no_auto_main():
 
 
 def test_python_codegen_coalesce_operator():
-    py = to_python(parse("fn main() -> Int { return nil ?? 5; }"))
+    py = to_python(parse("fn main() -> Int { return none ?? 5; }"))
+    assert "lambda __v:" in py
     assert "is not None else 5" in py
 
 
@@ -75,6 +77,7 @@ fn main() -> Int { return sum(1); }
 
 def test_x86_64_assembly_has_runtime_entry_and_main():
     asm = to_x86_64(parse("fn main() -> Int { return 0; }"))
+    assert_valid_x86_64_assembly(asm)
     assert "global _start" in asm
     assert "_start:" in asm
     assert "call main" in asm
@@ -86,7 +89,9 @@ def test_x86_64_build_writes_expected_assembly(tmp_path: Path):
     out = tmp_path / "prog.s"
     src.write_text("fn main() -> Int { return 0; }")
     build(str(src), str(out), "x86_64")
-    assert out.read_text() == to_x86_64(parse(src.read_text()))
+    asm = out.read_text()
+    assert_valid_x86_64_assembly(asm, workdir=tmp_path)
+    assert asm == to_x86_64(parse(src.read_text()))
 
 
 def test_x86_64_rejects_unresolved_builtin_calls():
@@ -121,6 +126,7 @@ fn main() -> Int {
 }
 """
     asm = to_x86_64(parse(src))
+    assert_valid_x86_64_assembly(asm)
     assert "while_begin" in asm
     assert "if_else" in asm
 

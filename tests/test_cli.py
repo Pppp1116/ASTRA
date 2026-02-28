@@ -1,6 +1,9 @@
+import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 
 def test_cli_check_ok(tmp_path: Path):
@@ -44,3 +47,19 @@ def test_cli_build_freestanding_x86(tmp_path: Path):
     asm = out.read_text()
     assert "global _start" in asm
     assert "_start:" in asm
+
+
+@pytest.mark.skipif(
+    shutil.which("nasm") is None or shutil.which("ld") is None,
+    reason="native target requires nasm and ld",
+)
+def test_cli_build_native_executable(tmp_path: Path):
+    src = tmp_path / "ok.astra"
+    out = tmp_path / "ok.exe"
+    src.write_text("fn main() -> Int { return 11; }")
+    rc = subprocess.call([sys.executable, "-m", "astra.cli", "build", str(src), "-o", str(out), "--target", "native"])
+    assert rc == 0
+    assert out.exists()
+    assert out.stat().st_mode & 0o111
+    rc = subprocess.call([str(out)])
+    assert rc == 11

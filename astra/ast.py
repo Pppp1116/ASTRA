@@ -190,6 +190,14 @@ class ExprStmt:
 
 
 @dataclass
+class DropStmt:
+    expr: Any
+    pos: int = 0
+    line: int = 0
+    col: int = 0
+
+
+@dataclass
 class Call:
     fn: Any
     args: list[Any]

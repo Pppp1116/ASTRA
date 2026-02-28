@@ -22,14 +22,18 @@ python build/hello.py
 - `astprof`: profiler
 
 ## Build options
-- `astra build <in> -o <out> [--target py|x86_64] [--emit-ir path.json] [--strict] [--freestanding]`
+- `astra build <in> -o <out> [--target py|x86_64|native] [--emit-ir path.json] [--strict] [--freestanding]`
 - `astra check <in> [--freestanding]`
 - `astra test [--kind unit|integration|e2e]`
+- `--target native` assembles/links x86-64 output into an executable (requires `nasm` and `ld` in `PATH`).
 
 ## Syntax notes
 - Immutable locals use `fixed`, mutable/inferred locals use `let`.
 - Preferred typed style is `name: Type` (legacy `name Type` still parses for params/fields).
 - Integer-width aliases are available: `i8/u8/i16/u16/i32/u32/i64/u64/i128/u128/isize/usize`.
+- Optional values use `Option<T>` + `none` (with `T?` sugar); `Nil` is not a type.
+- `Never` is coercible to any type; `return;` is valid only in `-> Void` functions.
 - Freestanding builds avoid hosted entrypoint assumptions and are suitable for kernels/runtime stubs.
 - `defer expr;` runs cleanup logic at function exit.
-- `a ?? b` is a null-coalescing operator for concise fallback values.
+- `a ?? b` coalesces `Option<T>` values (`a: Option<T>`, `b: T`).
+- Bare expression statements must be `Void`/`Never`; use `drop expr;` to discard other values.

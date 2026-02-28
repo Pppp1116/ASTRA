@@ -27,7 +27,8 @@ KEYWORDS = [
     "await",
     "unsafe",
     "match",
-    "nil",
+    "drop",
+    "none",
 ]
 
 

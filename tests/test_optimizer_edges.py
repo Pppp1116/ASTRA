@@ -48,7 +48,7 @@ def test_dead_trapping_expr_statement_is_not_removed(tmp_path: Path):
     src.write_text(
         """
 fn main() -> Int {
-  1 / 0;
+  drop 1 / 0;
   return 0;
 }
 """
