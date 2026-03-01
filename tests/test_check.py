@@ -22,3 +22,27 @@ fn main() -> Int { return 0; }
     res = run_check_source(src, filename="<mem>", collect_errors=True)
     assert not res.ok
     assert len(res.diagnostics) >= 2
+
+
+def test_check_reports_lex_error_with_phase_code_and_span():
+    src = 'fn main() -> Int { let s = "unterminated; return 0; }'
+    res = run_check_source(src, filename="mem://lex.astra")
+    assert not res.ok
+    first = res.diagnostics[0]
+    assert first.phase == "LEX"
+    assert first.code == "ASTRA-LEX-0001"
+    assert first.span.filename == "mem://lex.astra"
+    assert first.span.line == 1
+    assert first.span.col > 1
+
+
+def test_check_reports_parse_error_with_phase_code_and_span():
+    src = "fn main() -> Int { let x = ; return 0; }"
+    res = run_check_source(src, filename="mem://parse.astra")
+    assert not res.ok
+    first = res.diagnostics[0]
+    assert first.phase == "PARSE"
+    assert first.code in {"ASTRA-PARSE-0001", "ASTRA-PARSE-0002"}
+    assert first.span.filename == "mem://parse.astra"
+    assert first.span.line == 1
+    assert first.span.col > 1

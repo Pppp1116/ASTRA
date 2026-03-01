@@ -1,4 +1,4 @@
-from astra.parser import parse
+from astra.parser import ParseError, parse
 from astra.semantic import SemanticError, analyze
 
 
@@ -62,6 +62,28 @@ def test_for_condition_must_be_bool():
         assert False
     except SemanticError as e:
         assert "for condition" in str(e)
+
+
+def test_for_in_requires_range_syntax():
+    src = "fn main() -> Int { let xs = [1, 2, 3]; for x in xs { return x; } return 0; }"
+    try:
+        analyze(parse(src))
+        assert False
+    except ParseError as e:
+        assert "for-in currently supports only range syntax" in str(e)
+
+
+def test_range_for_loop_typechecks():
+    src = """
+fn main() -> Int {
+  let mut total = 0;
+  for i in 1..=4 {
+    total += i;
+  }
+  return total;
+}
+"""
+    analyze(parse(src))
 
 
 def test_missing_import_is_semantic_error():
@@ -167,6 +189,29 @@ def test_never_expression_statement_is_valid():
 def test_defer_is_semantically_valid():
     src = 'fn main() -> Int { defer print("bye"); return 0; }'
     analyze(parse(src))
+
+
+def test_match_wildcard_makes_bool_match_exhaustive():
+    src = "fn main() -> Int { let b = true; match b { true => { return 1; }, _ => { return 0; } } return 0; }"
+    analyze(parse(src))
+
+
+def test_match_wildcard_must_be_last():
+    src = "fn main() -> Int { let b = true; match b { _ => { return 1; }, false => { return 0; } } return 0; }"
+    try:
+        analyze(parse(src))
+        assert False
+    except SemanticError as e:
+        assert "wildcard match arm must be last" in str(e)
+
+
+def test_match_duplicate_bool_pattern_is_rejected():
+    src = "fn main() -> Int { let b = true; match b { true => { return 1; }, true => { return 2; }, false => { return 3; } } return 0; }"
+    try:
+        analyze(parse(src))
+        assert False
+    except SemanticError as e:
+        assert "duplicate Bool match arm for true" in str(e)
 
 
 def test_specialization_prefers_concrete_impl():

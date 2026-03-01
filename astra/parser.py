@@ -479,10 +479,33 @@ class Parser:
         if self.cur().kind == "IDENT" and self.peek().kind == "in":
             ident = self.eat("IDENT")
             self.eat("in")
-            expr = self.parse_expr()
-            body = self.parse_block()
-            init = LetStmt(ident.text, Name("<iter>", ident.pos, ident.line, ident.col), True, None, ident.pos, ident.line, ident.col)
-            return ForStmt(init, expr, None, body, tok.pos, tok.line, tok.col)
+            start_expr = self.parse_expr()
+            if self.opt(".."):
+                dots_tok = self.toks[self.i - 1]
+                inclusive = bool(self.opt("="))
+                end_expr = self.parse_expr()
+                body = self.parse_block()
+                idx_name = ident.text
+                init = LetStmt(idx_name, start_expr, True, None, ident.pos, ident.line, ident.col)
+                cond = Binary(
+                    "<=" if inclusive else "<",
+                    Name(idx_name, ident.pos, ident.line, ident.col),
+                    end_expr,
+                    dots_tok.pos,
+                    dots_tok.line,
+                    dots_tok.col,
+                )
+                step = AssignStmt(
+                    Name(idx_name, ident.pos, ident.line, ident.col),
+                    "+=",
+                    Literal(1, dots_tok.pos, dots_tok.line, dots_tok.col),
+                    dots_tok.pos,
+                    dots_tok.line,
+                    dots_tok.col,
+                )
+                return ForStmt(init, cond, step, body, tok.pos, tok.line, tok.col)
+            self._err("for-in currently supports only range syntax `start..end` or `start..=end`", self.cur())
+            raise ParseError(self.errors[-1])
         init = None
         if self.cur().kind != ";":
             if self.cur().kind in {"let", "fixed"}:
@@ -513,7 +536,11 @@ class Parser:
         self.eat("{")
         arms: list[tuple[Any, list[Any]]] = []
         while self.cur().kind != "}":
-            pattern = self.parse_expr()
+            if self.cur().kind == "IDENT" and self.cur().text == "_":
+                wtok = self.eat("IDENT")
+                pattern = WildcardPattern(wtok.pos, wtok.line, wtok.col)
+            else:
+                pattern = self.parse_expr()
             self.eat("=>")
             body = self.parse_block()
             arms.append((pattern, body))
@@ -596,6 +623,8 @@ class Parser:
         if self.opt("FLOAT"):
             return Literal(_parse_float_literal(tok.text), tok.pos, tok.line, tok.col)
         if self.opt("STR"):
+            return Literal(tok.text, tok.pos, tok.line, tok.col)
+        if self.opt("STR_MULTI"):
             return Literal(tok.text, tok.pos, tok.line, tok.col)
         if self.opt("CHAR"):
             return Literal(tok.text, tok.pos, tok.line, tok.col)

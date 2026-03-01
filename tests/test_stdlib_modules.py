@@ -12,10 +12,16 @@ def _load(path: str) -> str:
 
 
 def test_core_stdlib_module_analyzes_in_freestanding_mode():
-    module = "stdlib/core.astra"
-    src = _load(module)
-    prog = parse(src, filename=module)
-    analyze(prog, filename=module, freestanding=True)
+    modules = [
+        "stdlib/core.astra",
+        "stdlib/math.astra",
+        "stdlib/vec.astra",
+        "stdlib/mem.astra",
+    ]
+    for module in modules:
+        src = _load(module)
+        prog = parse(src, filename=module)
+        analyze(prog, filename=module, freestanding=True)
 
 
 def test_hosted_stdlib_modules_are_rejected_in_freestanding_mode():
@@ -23,6 +29,7 @@ def test_hosted_stdlib_modules_are_rejected_in_freestanding_mode():
         "stdlib/collections.astra",
         "stdlib/crypto.astra",
         "stdlib/io.astra",
+        "stdlib/str.astra",
         "stdlib/net.astra",
         "stdlib/process.astra",
         "stdlib/serde.astra",
@@ -39,11 +46,14 @@ def test_extended_stdlib_exports_exist():
     checks = {
         "stdlib/core.astra": {"Option", "Result", "Bytes", "add_checked", "sub_checked", "mul_checked", "div_checked"},
         "stdlib/time.astra": {"now_ms", "sleep_seconds"},
-        "stdlib/io.astra": {"read_or"},
+        "stdlib/io.astra": {"read_or", "print_int", "print_bool", "print_float", "print_str", "print_any"},
         "stdlib/collections.astra": {"map_get_or"},
         "stdlib/net.astra": {"tcp_send_line"},
-        "stdlib/process.astra": {"env_or", "run_ok"},
+        "stdlib/process.astra": {"env_or", "run_ok", "eprintln"},
         "stdlib/crypto.astra": {"digest_pair"},
+        "stdlib/math.astra": {"min_int", "max_int", "clamp_int", "abs_int"},
+        "stdlib/vec.astra": {"vec_new_typed", "vec_len_typed", "vec_push_typed", "vec_get_typed"},
+        "stdlib/mem.astra": {"fill_bytes", "copy_bytes"},
     }
     for path, expected in checks.items():
         prog = parse(_load(path), filename=path)

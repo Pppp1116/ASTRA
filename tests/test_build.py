@@ -32,6 +32,19 @@ def test_build_emit_ir(tmp_path: Path):
     assert "astra_run_py" not in text
 
 
+def test_native_missing_clang_reports_codegen_error(monkeypatch, tmp_path: Path):
+    src = tmp_path / "no_clang.astra"
+    out = tmp_path / "no_clang.exe"
+    src.write_text("fn main() -> Int { return 0; }")
+    # Simulate an environment without clang even if CI provides it.
+    monkeypatch.setattr(build_mod, "shutil", shutil)
+    monkeypatch.setattr(build_mod.shutil, "which", lambda _: None)
+    with pytest.raises(RuntimeError) as excinfo:
+        build(str(src), str(out), "native")
+    msg = str(excinfo.value)
+    assert msg.startswith("CODEGEN ")
+
+
 def test_build_cache_invalidates_when_imported_module_changes(tmp_path: Path):
     src = tmp_path / "main.astra"
     dep = tmp_path / "helper.astra"

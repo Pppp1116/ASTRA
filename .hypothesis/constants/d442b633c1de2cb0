@@ -1,0 +1,4 @@
+# file: /home/pedro/Downloads/programming-language-/astra/module_resolver.py
+# hypothesis_version: 6.151.9
+
+['.', '.astra', '<input>', 'ASTRA_RUNTIME_C_PATH', 'ASTRA_STDLIB_PATH', 'Astra.toml', 'assets', 'empty import path', 'llvm_runtime.c', 'runtime', 'std', 'stdlib']

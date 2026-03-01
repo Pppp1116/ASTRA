@@ -49,6 +49,8 @@ def _fmt_expr(e) -> str:
         return str(e.value)
     if isinstance(e, Name):
         return e.value
+    if isinstance(e, WildcardPattern):
+        return "_"
     if isinstance(e, AwaitExpr):
         return f"await {_fmt_expr_with_prec(e.expr, _PREC_UNARY)}"
     if isinstance(e, Unary):
@@ -145,6 +147,27 @@ def _fmt_stmt(st, ind: int) -> list[str]:
         out.append(f"{p}}}")
         return out
     if isinstance(st, ForStmt):
+        if (
+            isinstance(st.init, LetStmt)
+            and st.init.mut
+            and st.init.type_name is None
+            and isinstance(st.cond, Binary)
+            and st.cond.op in {"<", "<="}
+            and isinstance(st.cond.left, Name)
+            and st.cond.left.value == st.init.name
+            and isinstance(st.step, AssignStmt)
+            and st.step.op == "+="
+            and isinstance(st.step.target, Name)
+            and st.step.target.value == st.init.name
+            and isinstance(st.step.expr, Literal)
+            and st.step.expr.value == 1
+        ):
+            dots = "..=" if st.cond.op == "<=" else ".."
+            out = [f"{p}for {st.init.name} in {_fmt_expr(st.init.expr)}{dots}{_fmt_expr(st.cond.right)} {{"]
+            for s in st.body:
+                out.extend(_fmt_stmt(s, ind + 1))
+            out.append(f"{p}}}")
+            return out
         init = ""
         if isinstance(st.init, LetStmt):
             init_kw = "fixed" if st.init.fixed else "let"

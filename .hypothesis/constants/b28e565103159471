@@ -1,0 +1,4 @@
+# file: /home/pedro/Downloads/programming-language-/astra/check.py
+# hypothesis_version: 6.151.9
+
+['<input>', 'ASTRA-CFG-0001', 'ASTRA-COMPTIME-0001', 'ASTRA-ENTRY-0001', 'ASTRA-LEX-0001', 'ASTRA-LEX-0002', 'ASTRA-LEX-0003', 'ASTRA-LEX-0004', 'ASTRA-LEX-9999', 'ASTRA-MOD-0001', 'ASTRA-NAME-0001', 'ASTRA-NAME-0002', 'ASTRA-PARSE-0001', 'ASTRA-PARSE-0002', 'ASTRA-PARSE-0003', 'ASTRA-PARSE-9999', 'ASTRA-SEM-9999', 'ASTRA-TYPE-0001', 'ASTRA-UNKNOWN-9999', 'LEX', 'PARSE', 'SEM', 'code', 'col', 'comptime:', 'debug', 'end_col', 'end_line', 'error', 'expected ', 'filename', 'line', 'message', 'missing main()', 'notes', 'outside loop', 'phase', 'severity', 'span', 'trap', 'type mismatch', 'undefined function', 'undefined name', 'unexpected atom', 'unexpected eof', 'unterminated char', 'unterminated string']

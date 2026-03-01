@@ -21,6 +21,11 @@ python build/hello.py
 - `astdbg`: debugger (break/step/inspect)
 - `astprof`: profiler
 
+## Documentation
+- `docs/TOUR.md`: quick language walkthrough
+- `docs/SPEC_COMPLIANCE.md`: SPEC-to-implementation/test mapping
+- `docs/DIAGNOSTICS.md`: stable `astra check --json` diagnostic codes
+
 ## Build options
 - `astra build <in> -o <out> [--target py|llvm|native] [--emit-ir path.ll] [--strict] [--freestanding] [--profile debug|release] [--overflow trap|wrap|debug] [--triple <llvm-triple>]`
 - `astra check <in> [--freestanding] [--overflow trap|wrap|debug] [--json]`
@@ -55,6 +60,8 @@ python build/hello.py
 - Freestanding builds avoid hosted entrypoint assumptions and are suitable for kernels/runtime stubs.
 - `defer expr;` runs cleanup logic at function exit.
 - `a ?? b` coalesces `Option<T>` values (`a: Option<T>`, `b: T`).
+- Range loops are supported as `for i in start..end { ... }` and `for i in start..=end { ... }`.
+- `match` supports wildcard arm `_` (must be the last arm).
 - Expression statements may discard values of any type; `drop expr;` remains available for explicit immediate destruction-style intent.
 - LLVM backend emits validated LLVM IR through `llvmlite` and native builds are performed by `clang`.
 - `i128/u128` helper runtime symbols remain available in the portable runtime for trap/wrap hard-op behavior.

@@ -18,14 +18,18 @@ from astra.ast import (
     ImportDecl,
     IndexExpr,
     LetStmt,
+    Literal,
+    MatchStmt,
     MaxValTypeExpr,
     MinValTypeExpr,
+    Name,
     SizeOfTypeExpr,
     SizeOfValueExpr,
     StructDecl,
     TypeAliasDecl,
     Unary,
     UnsafeStmt,
+    WildcardPattern,
 )
 from astra.parser import ParseError, parse
 from astra.semantic import SemanticError, analyze
@@ -71,6 +75,47 @@ pub fn main() -> Int {
     assert any(isinstance(s, BreakStmt) for s in fn.body[1].body[0].then_body)
     assert any(isinstance(s, ContinueStmt) for s in fn.body[1].body)
     assert isinstance(fn.body[2], AssignStmt) and fn.body[2].op == "="
+
+
+def test_parse_range_for_desugars_to_cstyle_loop():
+    src = """
+fn main() -> Int {
+  let mut total = 0;
+  for i in 1..4 {
+    total += i;
+  }
+  return total;
+}
+"""
+    prog = parse(src)
+    fn = prog.items[0]
+    loop = fn.body[1]
+    assert isinstance(loop, ForStmt)
+    assert isinstance(loop.init, LetStmt)
+    assert loop.init.name == "i"
+    assert isinstance(loop.init.expr, Literal) and loop.init.expr.value == 1
+    assert isinstance(loop.cond, Binary) and loop.cond.op == "<"
+    assert isinstance(loop.step, AssignStmt) and loop.step.op == "+="
+    assert isinstance(loop.step.target, Name) and loop.step.target.value == "i"
+
+
+def test_parse_range_for_inclusive_uses_lte_condition():
+    src = "fn main() -> Int { for i in 0..=2 { } return 0; }"
+    prog = parse(src)
+    fn = prog.items[0]
+    loop = fn.body[0]
+    assert isinstance(loop, ForStmt)
+    assert isinstance(loop.cond, Binary)
+    assert loop.cond.op == "<="
+
+
+def test_parse_match_accepts_wildcard_pattern():
+    src = "fn main() -> Int { let x = 1; match x { _ => { return 2; } } return 0; }"
+    prog = parse(src)
+    fn = prog.items[0]
+    m = fn.body[1]
+    assert isinstance(m, MatchStmt)
+    assert isinstance(m.arms[0][0], WildcardPattern)
 
 
 def test_import_supports_dotted_module_and_string_forms():
@@ -182,6 +227,18 @@ fn main() -> Int {
     assert fn.body[2].expr.op == "??"
 
 
+def test_parse_accepts_multiline_string_literal():
+    src = """
+fn main() -> Int {
+  let s = \"\"\"a
+b\"\"\";
+  return 0;
+}
+"""
+    prog = parse(src)
+    assert isinstance(prog.items[0], FnDecl)
+
+
 def test_parse_drop_stmt():
     src = "fn main() -> Int { drop print(1); return 0; }"
     prog = parse(src)
@@ -224,6 +281,17 @@ def test_multi_error_recovery_collects_multiple():
         lines = str(e).splitlines()
         assert len(lines) >= 2
         assert any(line.startswith("PARSE") for line in lines)
+
+
+def test_parse_deep_nesting_reports_parse_error_with_span():
+    nested = "(" * 120 + "1" + ")" * 119
+    bad = f"fn main() -> Int {{ let x = {nested}; return 0; }}"
+    try:
+        parse(bad, filename="deep.astra")
+        assert False, "expected ParseError"
+    except ParseError as e:
+        line = str(e).splitlines()[0]
+        assert line.startswith("PARSE deep.astra:1:")
 
 
 def test_nil_keyword_is_rejected():

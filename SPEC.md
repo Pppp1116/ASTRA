@@ -44,7 +44,7 @@ single_op       = "{" | "}" | "(" | ")" | "<" | ">" | ";" | "," | "=" | "+"
 Notes:
 - Unterminated block comments/strings/chars are lexer errors (`LEX file:line:col: ...`).
 - `doc_comment` tokens are consumed by parser in declaration/block positions.
-- `str_multi_lit` is tokenized but not currently accepted by expression parsing.
+- `str_multi_lit` is tokenized as `STR_MULTI` and accepted by expression parsing; it produces the same literal expression shape as `str_lit` but may contain embedded newlines and indentation.
 - `int_type_tok` is recognized as an integer-type token and validated to width range `1..128` (`i0`, `u0`, and widths above `128` are lexer errors).
 - `@packed` is recognized as an attribute introducer and is only valid on `struct` declarations.
 
@@ -246,10 +246,6 @@ Normative boundary rule:
 
 ## 9. Diagnostics and Source Span Requirements
 
-Current issue:
-- Some semantic internal checks emit hardcoded `SEM <input>:1:1` (e.g. internal owned-state checks), which hides real source locations.
-- Optimizer/IR transforms may lose clean origin mapping.
-
 Required model:
 
 ```text
@@ -264,7 +260,7 @@ Span {
 
 Rules:
 - Every AST node must carry a `Span` (not only line/col).
-- All diagnostics (`LEX/PARSE/SEM/CODEGEN`) must use node-associated spans.
+- All diagnostics (`LEX/PARSE/SEM/CODEGEN`) must use node-associated spans; hardcoded `SEM <input>:1:1` locations are not allowed.
 - Internal semantic errors (including ownership/borrow state helpers) must receive and report the current node span.
 - Optimizer/IR passes must preserve origin spans or maintain a stable source-map from transformed nodes back to original spans.
 - Synthetic/compiler-generated nodes must carry either:

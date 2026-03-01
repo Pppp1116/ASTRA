@@ -284,6 +284,13 @@ class Unary:
 
 
 @dataclass
+class WildcardPattern:
+    pos: int = 0
+    line: int = 0
+    col: int = 0
+
+
+@dataclass
 class AwaitExpr:
     expr: Any
     pos: int = 0
