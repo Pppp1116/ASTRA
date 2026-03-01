@@ -189,7 +189,7 @@ Numeric semantics:
   - `build --profile release` => effective default `wrap`
   - `--overflow trap|wrap|debug` overrides profile defaults (`debug` resolves by profile)
 
-## 7. Backend-Defined Behavior Boundaries (`py` vs `x86_64`)
+## 7. Backend-Defined Behavior Boundaries (`py` vs `llvm/native`)
 
 Frontend (lex/parse/semantic) is shared; backend differences begin at lowering/codegen.
 
@@ -202,14 +202,15 @@ Common contract:
 - Broader dynamic runtime support and host interop through emitted Python.
 - Numeric behavior and runtime effects follow Python execution model.
 
-`x86_64` backend:
-- System V ABI-oriented lowering with explicit int/SSE classes.
-- `Int` lowers to 64-bit integer ABI representation.
-- Runtime ABI symbols are required for lowered builtins (`astra_*` shims).
-- `i128`/`u128` lowering uses split register returns (`rax` low, `rdx` high) and runtime helpers for hard ops (`mul/div/mod`).
-- Packed struct fields are lowered through bit extraction/update sequences; current packed backend support is limited to packed fields up to 64 bits.
-- Backend has explicit unsupported-case errors for some constructs/types; these are `CODEGEN` errors.
-- `native` target additionally requires external toolchain (`nasm` and linker via `cc`/`ld`).
+`llvm` backend:
+- Emits textual LLVM IR through `llvmlite`.
+- `Int` lowers to 64-bit integer representation.
+- Runtime ABI symbols are declared for lowered builtins (`astra_*` shims).
+- Packed-struct/backend limits remain backend-defined (`CODEGEN`) if lowering cannot represent a construct.
+
+`native` target:
+- Compiles/links emitted LLVM IR with `clang` plus portable runtime (`runtime/llvm_runtime.c`).
+- Freestanding/native modes are backend/toolchain-defined and may require explicit target-entry compatibility.
 
 Normative boundary rule:
 - If a program passes semantic analysis but fails only due to backend lowering limits, failure must be reported as backend-defined (`CODEGEN`) rather than semantic invalidity.

@@ -8,6 +8,7 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: '3.11' }
       - run: pip install -e .[dev]
+      - run: clang --version
       - run: pytest -q --cov=astra --cov-report=term-missing
       - run: pytest -q tests/test_property_fuzz.py
       - run: mutmut run --max-children 1

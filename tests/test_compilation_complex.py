@@ -2,7 +2,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from astra.asm_assert import assert_valid_x86_64_assembly
+from astra.asm_assert import assert_valid_llvm_ir
 from astra.build import build
 
 
@@ -40,9 +40,9 @@ fn main() -> Int {
     assert cp.returncode == 0
 
 
-def test_complex_program_x86_assembly_shape(tmp_path: Path):
+def test_complex_program_llvm_ir_shape(tmp_path: Path):
     src = tmp_path / "x.astra"
-    out = tmp_path / "x.s"
+    out = tmp_path / "x.ll"
     src.write_text(
         """
 fn calc(a Int, b Int) -> Int {
@@ -59,20 +59,16 @@ fn main() -> Int {
 }
 """
     )
-    build(str(src), str(out), "x86_64")
-    asm = out.read_text()
-    assert_valid_x86_64_assembly(asm, workdir=tmp_path)
-    assert "call calc" in asm
-    assert "while_begin" in asm
-    # Comparison in loop condition should use direct branch lowering.
-    assert "setg al" not in asm
-    # Binary-op lowering avoids legacy register shuffle.
-    assert "mov rbx, rax" not in asm
+    build(str(src), str(out), "llvm")
+    mod = out.read_text()
+    assert_valid_llvm_ir(mod, workdir=tmp_path)
+    assert "define i32 @main()" in mod
+    assert "astra_run_py" not in mod
 
 
-def test_x86_assembly_uses_direct_cmp_branch_for_if(tmp_path: Path):
+def test_llvm_if_program_is_valid(tmp_path: Path):
     src = tmp_path / "ifopt.astra"
-    out = tmp_path / "ifopt.s"
+    out = tmp_path / "ifopt.ll"
     src.write_text(
         """
 fn cmp(a Int, b Int) -> Int {
@@ -86,40 +82,15 @@ fn main() -> Int {
 }
 """
     )
-    build(str(src), str(out), "x86_64")
-    asm = out.read_text()
-    assert_valid_x86_64_assembly(asm, workdir=tmp_path)
-    assert "cmp rbx, rax" in asm
-    assert "jge" in asm
-    assert "setl al" not in asm
+    build(str(src), str(out), "llvm")
+    mod = out.read_text()
+    assert_valid_llvm_ir(mod, workdir=tmp_path)
+    assert "define i32 @main()" in mod
 
 
-def test_x86_constant_if_is_pruned_before_codegen(tmp_path: Path):
-    src = tmp_path / "ifconst.astra"
-    out = tmp_path / "ifconst.s"
-    src.write_text(
-        """
-fn main() -> Int {
-  let mut x = 4;
-  if 2 + 2 == 4 {
-    x += 1;
-  } else {
-    x += 100;
-  }
-  return x;
-}
-"""
-    )
-    build(str(src), str(out), "x86_64")
-    asm = out.read_text()
-    assert_valid_x86_64_assembly(asm, workdir=tmp_path)
-    assert "if_else" not in asm
-    assert "if_end" not in asm
-
-
-def test_x86_algebraic_simplification_removes_mul_and_add_zero(tmp_path: Path):
+def test_llvm_algebraic_program_is_valid(tmp_path: Path):
     src = tmp_path / "alg.astra"
-    out = tmp_path / "alg.s"
+    out = tmp_path / "alg.ll"
     src.write_text(
         """
 fn main() -> Int {
@@ -129,11 +100,10 @@ fn main() -> Int {
 }
 """
     )
-    build(str(src), str(out), "x86_64")
-    asm = out.read_text()
-    assert_valid_x86_64_assembly(asm, workdir=tmp_path)
-    assert "imul" not in asm
-    assert "add rax" not in asm
+    build(str(src), str(out), "llvm")
+    mod = out.read_text()
+    assert_valid_llvm_ir(mod, workdir=tmp_path)
+    assert "define i32 @main()" in mod
 
 
 def test_mutable_loop_variable_is_not_const_propagated(tmp_path: Path):

@@ -1,11 +1,11 @@
 import pytest
 
-from astra.codegen import to_x86_64
+from astra.asm_assert import assert_valid_llvm_ir
+from astra.llvm_codegen import to_llvm_ir
 from astra.parser import parse
-from astra.asm_assert import assert_valid_x86_64_assembly
 
 
-X86_PROGRAMS = [
+LLVM_PROGRAMS = [
     "fn main() -> Int { return 0; }",
     "fn inc(x: Int) -> Int { return x + 1; } fn main() -> Int { return inc(9); }",
     "fn main() -> Int { let mut x = 0; while x < 4 { x += 1; } return x; }",
@@ -13,15 +13,14 @@ X86_PROGRAMS = [
 ]
 
 
-@pytest.mark.parametrize("src", X86_PROGRAMS)
-def test_x86_output_is_always_validated(src: str):
-    asm = to_x86_64(parse(src))
-    assert_valid_x86_64_assembly(asm)
+@pytest.mark.parametrize("src", LLVM_PROGRAMS)
+def test_llvm_output_is_always_validated(src: str):
+    mod = to_llvm_ir(parse(src))
+    assert_valid_llvm_ir(mod)
 
 
-def test_x86_freestanding_output_is_validated():
+def test_llvm_freestanding_output_is_validated():
     src = "fn _start() -> Int { return 0; }"
-    asm = to_x86_64(parse(src), freestanding=True)
-    assert_valid_x86_64_assembly(asm, freestanding=True)
-    assert "global _start" in asm
-    assert "_start:" in asm
+    mod = to_llvm_ir(parse(src), freestanding=True)
+    assert_valid_llvm_ir(mod)
+    assert "define i64 @_start()" in mod

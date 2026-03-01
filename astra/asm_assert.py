@@ -1,39 +1,55 @@
 from __future__ import annotations
 
-import re
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
+try:
+    from llvmlite import binding
+except Exception:  # pragma: no cover
+    binding = None
 
-def assert_valid_x86_64_assembly(asm: str, *, freestanding: bool = False, workdir: Path | None = None) -> None:
-    lines = [line.rstrip() for line in asm.splitlines() if line.strip()]
-    assert lines, "assembly output is empty"
-    assert any(line == "section .text" for line in lines), "missing text section"
-    assert "unsupported" not in asm
-    assert "TODO" not in asm
 
-    if not freestanding:
-        assert any(line == "global _start" for line in lines), "missing runtime entry global"
-        assert any(line == "_start:" for line in lines), "missing runtime entry label"
+_LLVM_INIT_DONE = False
 
-    labels = [line[:-1] for line in lines if line.endswith(":")]
-    assert len(labels) == len(set(labels)), "duplicate assembly label detected"
 
-    instr_re = re.compile(r"^[a-z]+(\s|$)")
-    for line in lines:
-        if line.endswith(":") or line.startswith("section ") or line.startswith("global "):
-            continue
-        stripped = line.strip()
-        assert instr_re.match(stripped), f"invalid instruction line: {line!r}"
+def _init_llvm_once() -> None:
+    global _LLVM_INIT_DONE
+    if _LLVM_INIT_DONE:
+        return
+    if binding is None:
+        return
+    try:
+        binding.initialize_native_target()
+        binding.initialize_native_asmprinter()
+    except RuntimeError:
+        # Newer llvmlite versions auto-initialize.
+        pass
+    _LLVM_INIT_DONE = True
 
-    nasm = shutil.which("nasm")
-    if nasm is None:
+
+def assert_valid_llvm_ir(ir_text: str, *, triple: str | None = None, workdir: Path | None = None) -> None:
+    text = ir_text.strip()
+    assert text, "LLVM IR output is empty"
+    assert "TODO" not in text
+    if triple:
+        assert triple in text, f"missing module triple {triple!r}"
+
+    if binding is not None:
+        _init_llvm_once()
+        mod = binding.parse_assembly(ir_text)
+        mod.verify()
+        return
+
+    clang = shutil.which("clang")
+    if clang is None:
         return
 
     out_dir = workdir or Path.cwd()
-    src = out_dir / "_asm_check.s"
-    obj = out_dir / "_asm_check.o"
-    src.write_text(asm)
-    cp = subprocess.run([nasm, "-felf64", str(src), "-o", str(obj)], capture_output=True, text=True)
-    assert cp.returncode == 0, f"nasm failed: {cp.stderr or cp.stdout}"
+    with tempfile.TemporaryDirectory(prefix="astra-ir-check-", dir=str(out_dir)) as td:
+        ll = Path(td) / "module.ll"
+        obj = Path(td) / "module.o"
+        ll.write_text(ir_text)
+        cp = subprocess.run([clang, "-c", str(ll), "-o", str(obj)], capture_output=True, text=True)
+        assert cp.returncode == 0, f"clang failed to compile LLVM IR: {cp.stderr or cp.stdout}"

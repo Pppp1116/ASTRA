@@ -23,7 +23,7 @@ def test_cli_check_fails_on_semantic_error(tmp_path: Path):
 def test_cli_build_emit_ir(tmp_path: Path):
     src = tmp_path / "ok.astra"
     out = tmp_path / "ok.py"
-    ir = tmp_path / "ok.ir.json"
+    ir = tmp_path / "ok.ll"
     src.write_text("fn main() -> Int { let x = 1 + 2; return x; }")
     rc = subprocess.call([sys.executable, "-m", "astra.cli", "build", str(src), "-o", str(out), "--emit-ir", str(ir)])
     assert rc == 0
@@ -68,20 +68,19 @@ def test_cli_check_accepts_overflow_flag(tmp_path: Path):
     assert rc == 0
 
 
-def test_cli_build_freestanding_x86(tmp_path: Path):
+def test_cli_build_freestanding_llvm(tmp_path: Path):
     src = tmp_path / "boot.astra"
-    out = tmp_path / "boot.s"
+    out = tmp_path / "boot.ll"
     src.write_text("fn _start() -> Int { return 0; }")
-    rc = subprocess.call([sys.executable, "-m", "astra.cli", "build", str(src), "-o", str(out), "--target", "x86_64", "--freestanding"])
+    rc = subprocess.call([sys.executable, "-m", "astra.cli", "build", str(src), "-o", str(out), "--target", "llvm", "--freestanding"])
     assert rc == 0
-    asm = out.read_text()
-    assert "global _start" in asm
-    assert "_start:" in asm
+    mod = out.read_text()
+    assert "define i64 @_start()" in mod
 
 
 @pytest.mark.skipif(
-    shutil.which("nasm") is None or (shutil.which("cc") is None and shutil.which("ld") is None),
-    reason="native target requires nasm and a linker (cc/ld)",
+    shutil.which("clang") is None,
+    reason="native target requires clang",
 )
 def test_cli_build_native_executable(tmp_path: Path):
     src = tmp_path / "ok.astra"
@@ -93,3 +92,26 @@ def test_cli_build_native_executable(tmp_path: Path):
     assert out.stat().st_mode & 0o111
     rc = subprocess.call([str(out)])
     assert rc == 11
+
+
+def test_cli_build_accepts_triple_for_llvm(tmp_path: Path):
+    src = tmp_path / "ok.astra"
+    out = tmp_path / "ok.ll"
+    src.write_text("fn main() -> Int { return 0; }")
+    rc = subprocess.call(
+        [
+            sys.executable,
+            "-m",
+            "astra.cli",
+            "build",
+            str(src),
+            "-o",
+            str(out),
+            "--target",
+            "llvm",
+            "--triple",
+            "wasm32-unknown-unknown",
+        ]
+    )
+    assert rc == 0
+    assert "target triple = \"wasm32-unknown-unknown\"" in out.read_text()

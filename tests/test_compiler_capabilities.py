@@ -2,9 +2,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-from astra.asm_assert import assert_valid_x86_64_assembly
+from astra.asm_assert import assert_valid_llvm_ir
 from astra.build import build
-from astra.codegen import CodegenError, to_python, to_x86_64
+from astra.codegen import to_python
+from astra.llvm_codegen import to_llvm_ir
 from astra.parser import parse
 from astra.semantic import SemanticError, analyze
 
@@ -82,182 +83,30 @@ fn main() -> Int { return sum(1); }
     assert cp.returncode == 2
 
 
-def test_x86_64_assembly_has_runtime_entry_and_main():
-    asm = to_x86_64(parse("fn main() -> Int { return 0; }"))
-    assert_valid_x86_64_assembly(asm)
-    assert "global _start" in asm
-    assert "_start:" in asm
-    assert "call main" in asm
-    assert "main:" in asm
+def test_llvm_ir_has_runtime_entry_and_main():
+    mod = to_llvm_ir(parse("fn main() -> Int { return 0; }"))
+    assert_valid_llvm_ir(mod)
+    assert "define i32 @main()" in mod
+    assert "astra_run_py" not in mod
 
 
-def test_x86_64_build_writes_expected_assembly(tmp_path: Path):
+def test_llvm_ir_freestanding_has_start():
+    mod = to_llvm_ir(parse("fn _start() -> Int { return 0; }"), freestanding=True)
+    assert_valid_llvm_ir(mod)
+    assert "define i64 @_start()" in mod
+
+
+def test_llvm_build_writes_expected_ir(tmp_path: Path):
     src = tmp_path / "prog.astra"
-    out = tmp_path / "prog.s"
+    out = tmp_path / "prog.ll"
     src.write_text("fn main() -> Int { return 0; }")
-    build(str(src), str(out), "x86_64")
-    asm = out.read_text()
-    assert_valid_x86_64_assembly(asm, workdir=tmp_path)
-    assert asm == to_x86_64(parse(src.read_text()))
+    build(str(src), str(out), "llvm")
+    mod = out.read_text()
+    assert_valid_llvm_ir(mod, workdir=tmp_path)
+    assert mod == to_llvm_ir(parse(src.read_text()))
 
 
-def test_x86_64_lowers_runtime_builtin_calls():
-    prog = parse('fn main() -> Int { print("x"); let p = alloc(8); free(p); return 0; }')
-    analyze(prog)
-    asm = to_x86_64(prog)
-    assert_valid_x86_64_assembly(asm)
-    assert "extern astra_print_str" in asm
-    assert "extern astra_alloc" in asm
-    assert "extern astra_free" in asm
-    assert "call astra_print_str" in asm
-    assert "call astra_alloc" in asm
-    assert "call astra_free" in asm
-
-
-def test_x86_64_supports_structured_defer_for_calls():
-    prog = parse("fn cleanup(x Int) -> Void { drop x; } fn main() -> Int { let x = 7; defer cleanup(x); return x; }")
-    analyze(prog)
-    asm = to_x86_64(prog)
-    assert_valid_x86_64_assembly(asm)
-    assert "defer_skip" in asm
-    assert "call cleanup" in asm
-
-
-def test_x86_64_supports_defer_non_call_expression():
-    prog = parse("fn main() -> Int { defer 1; return 0; }")
-    analyze(prog)
-    asm = to_x86_64(prog)
-    assert_valid_x86_64_assembly(asm)
-    assert "defer_loop" in asm
-
-
-def test_x86_64_supports_conditionals_and_loops():
-    src = """
-fn main() -> Int {
-  let x = 0;
-  while x < 3 {
-    x += 1;
-  }
-  if x == 3 {
-    return 7;
-  }
-  return 1;
-}
-"""
-    asm = to_x86_64(parse(src))
-    assert_valid_x86_64_assembly(asm)
-    assert "while_begin" in asm
-    assert "if_else" in asm
-
-
-def test_x86_64_supports_more_than_six_call_arguments():
-    src = """
-fn sum(a Int, b Int, c Int, d Int, e Int, f Int, g Int) -> Int {
-  return a + b + c + d + e + f + g;
-}
-fn main() -> Int {
-  return sum(1, 2, 3, 4, 5, 6, 7);
-}
-"""
-    prog = parse(src)
-    analyze(prog)
-    asm = to_x86_64(prog)
-    assert_valid_x86_64_assembly(asm)
-    assert "rbp+16" in asm
-    assert ("push qword" in asm) or ("push rax" in asm)
-
-
-def test_x86_64_uses_width_correct_parameter_spills():
-    src = """
-fn f(a: u8, b: u16, c: u32, d: i64) -> Int {
-  return (a as Int) + (b as Int) + (c as Int) + (d as Int);
-}
-fn main() -> Int {
-  return f(1 as u8, 2 as u16, 3 as u32, 4 as i64);
-}
-"""
-    prog = parse(src)
-    analyze(prog)
-    asm = to_x86_64(prog)
-    assert_valid_x86_64_assembly(asm)
-    assert "mov byte [rbp-" in asm
-    assert "mov word [rbp-" in asm
-    assert "mov dword [rbp-" in asm
-
-
-def test_x86_64_masks_non_standard_integer_width_results():
-    src = """
-fn main() -> Int {
-  let a: u4 = 15u4;
-  let b: u4 = 1u4;
-  let c: u4 = a + b;
-  return c as Int;
-}
-"""
-    prog = parse(src)
-    analyze(prog)
-    asm = to_x86_64(prog)
-    assert_valid_x86_64_assembly(asm)
-    assert "0x000000000000000f" in asm
-
-
-def test_x86_64_supports_packed_struct_field_access_and_update():
-    src = """
-@packed struct Header {
-  version: u4,
-  flags: u3,
-  enabled: u1,
-}
-fn main() -> Int {
-  let mut h = Header(3u4, 5u3, 1u1);
-  h.flags = 2u3;
-  return (h.version as Int) + (h.flags as Int) + (h.enabled as Int);
-}
-"""
-    prog = parse(src)
-    analyze(prog)
-    asm = to_x86_64(prog)
-    assert_valid_x86_64_assembly(asm)
-    assert "mov byte [r11]" in asm
-    assert "shr rax, 4" in asm
-
-
-def test_x86_64_supports_integer_type_intrinsics():
-    src = """
-fn main() -> Int {
-  let a = bitSizeOf(u3);
-  let b: u4 = maxVal(u4);
-  let c: i4 = minVal(i4);
-  let d = countOnes(b as Int);
-  let e = leadingZeros(b as Int);
-  let f = trailingZeros(b as Int);
-  return a + (b as Int) + (c as Int) + d + e + f;
-}
-"""
-    prog = parse(src)
-    analyze(prog)
-    asm = to_x86_64(prog)
-    assert_valid_x86_64_assembly(asm)
-    assert "popcnt" in asm
-    assert ("bsr" in asm) or ("bsf" in asm)
-
-
-def test_x86_64_bit_intrinsics_accept_arbitrary_width_integer_arguments():
-    src = """
-fn main() -> Int {
-  let x: u4 = 3u4;
-  return countOnes(x) + leadingZeros(x) + trailingZeros(x);
-}
-"""
-    prog = parse(src)
-    analyze(prog)
-    asm = to_x86_64(prog)
-    assert_valid_x86_64_assembly(asm)
-    assert "popcnt" in asm
-    assert "mov rax, 4" in asm
-
-
-def test_x86_64_i128_hard_ops_select_helper_symbols_by_overflow_mode():
+def test_llvm_supports_overflow_mode_variants():
     src = """
 fn main() -> Int {
   let a: i128 = 20 as i128;
@@ -270,219 +119,104 @@ fn main() -> Int {
 """
     prog = parse(src)
     analyze(prog)
-    asm_trap = to_x86_64(prog, overflow_mode="trap")
-    asm_wrap = to_x86_64(prog, overflow_mode="wrap")
-    assert_valid_x86_64_assembly(asm_trap)
-    assert_valid_x86_64_assembly(asm_wrap)
-    assert "extern astra_i128_mul_trap" in asm_trap
-    assert "extern astra_i128_div_trap" in asm_trap
-    assert "extern astra_i128_mod_trap" in asm_trap
-    assert "extern astra_i128_mul_wrap" in asm_wrap
-    assert "extern astra_i128_div_wrap" in asm_wrap
-    assert "extern astra_i128_mod_wrap" in asm_wrap
+    mod_trap = to_llvm_ir(prog, overflow_mode="trap")
+    mod_wrap = to_llvm_ir(prog, overflow_mode="wrap")
+    assert_valid_llvm_ir(mod_trap)
+    assert_valid_llvm_ir(mod_wrap)
 
 
-def test_x86_64_supports_indirect_function_pointer_calls():
+def test_llvm_packed_struct_fields_lower_with_bit_ops():
     src = """
-fn add(a Int, b Int) -> Int { return a + b; }
+@packed struct Header { a: u4, b: u3, c: u1, d: u8 }
 fn main() -> Int {
-  let f: fn(Int, Int) -> Int = add;
-  return f(3, 4);
+  let mut h = Header(3u4, 5u3, 1u1, 9u8);
+  h.a += 1u4;
+  h.d = 7u8;
+  return (h.a as Int) + (h.b as Int) + (h.c as Int) + (h.d as Int);
 }
 """
-    prog = parse(src)
-    analyze(prog)
-    asm = to_x86_64(prog)
-    assert_valid_x86_64_assembly(asm)
-    assert "call r11" in asm
+    mod = to_llvm_ir(parse(src))
+    assert_valid_llvm_ir(mod)
+    # Packed field accesses should be lowered via bit slicing (shift/mask style ops).
+    assert "lshr" in mod
+    assert "shl" in mod
+    assert "and" in mod
+    assert "or" in mod
 
 
-def test_x86_64_supports_match_statement_codegen():
+def test_llvm_lowering_covers_extended_runtime_builtins():
     src = """
-fn main() -> Int {
-  let x = 2;
-  match x {
-    1 => { return 10; }
-    2 => { return 22; }
-  }
-  return 0;
-}
-"""
-    prog = parse(src)
-    analyze(prog)
-    asm = to_x86_64(prog)
-    assert_valid_x86_64_assembly(asm)
-    assert "match_next" in asm
-    assert "match_end" in asm
-
-
-def test_x86_64_supports_pointer_deref_assignment():
-    src = """
-fn main() -> Int {
-  let mut x = 5;
-  let p = &mut x;
-  *p += 7;
-  return *p;
-}
-"""
-    prog = parse(src)
-    analyze(prog)
-    asm = to_x86_64(prog)
-    assert_valid_x86_64_assembly(asm)
-    assert "mov qword [r11], rax" in asm
-
-
-def test_x86_64_supports_none_coalesce_with_pointer_options():
-    src = """
-fn fallback() -> Int { return 9; }
-fn choose(p: Option<fn() -> Int>) -> Int {
-  let f = p ?? fallback;
-  return f();
-}
-fn main() -> Int {
-  let v: Option<fn() -> Int> = none;
-  return choose(v);
-}
-"""
-    prog = parse(src)
-    analyze(prog)
-    asm = to_x86_64(prog)
-    assert_valid_x86_64_assembly(asm)
-    assert "coalesce_right" in asm
-    assert "call r11" in asm
-
-
-def test_x86_64_supports_await_expression_lowering():
-    src = "fn main() -> Int { let x = await 5; return x; }"
-    prog = parse(src)
-    analyze(prog)
-    asm = to_x86_64(prog)
-    assert_valid_x86_64_assembly(asm)
-    assert "mov qword [rbp-8], 5" in asm
-
-
-def test_x86_64_supports_async_function_decls():
-    src = """
-async fn worker(x Int) -> Int {
-  return await x + 1;
-}
-fn main() -> Int {
-  return worker(4);
-}
-"""
-    prog = parse(src)
-    analyze(prog)
-    asm = to_x86_64(prog)
-    assert_valid_x86_64_assembly(asm)
-    assert "worker:" in asm
-    assert "call worker" in asm
-
-
-def test_x86_64_supports_struct_constructor_and_field_assignment():
-    src = """
-struct Pair { a Int, b Int }
-fn main() -> Int {
-  let mut p = Pair(2, 3);
-  p.a += 5;
-  return p.a + p.b;
-}
-"""
-    prog = parse(src)
-    analyze(prog)
-    asm = to_x86_64(prog)
-    assert_valid_x86_64_assembly(asm)
-    assert "lea r11, [rax+0]" in asm
-    assert "lea r11, [rax+8]" in asm
-
-
-def test_x86_64_supports_defer_inside_loops():
-    src = """
-fn main() -> Int {
-  let mut i = 0;
-  while i < 3 {
-    defer print(i);
-    i += 1;
-  }
-  return 0;
-}
-"""
-    prog = parse(src)
-    analyze(prog)
-    asm = to_x86_64(prog)
-    assert_valid_x86_64_assembly(asm)
-    assert "add qword" in asm
-    assert "defer_loop" in asm
-
-
-def test_x86_64_supports_get_and_coalesce_for_option_scalars():
-    src = """
-fn pick(xs: &[Int]) -> Int {
-  return xs.get(0) ?? 9;
-}
-fn main() -> Int { return 0; }
-"""
-    prog = parse(src)
-    analyze(prog)
-    asm = to_x86_64(prog)
-    assert_valid_x86_64_assembly(asm)
-    assert "get_none" in asm
-    assert "coalesce_right" in asm
-
-
-def test_x86_64_supports_non_runtime_builtin_lowering():
-    src = """
-fn worker(x Int) -> Int { return x; }
+fn worker(x: Int) -> Int { return x + 1; }
 fn main() -> Int {
   let t = spawn(worker, 1);
   drop join(t);
-  drop read_file("x");
+  drop await_result(1);
   drop args();
   drop arg(0);
-  drop list_get(list_new(), 0);
-  drop map_get(map_new(), 1);
-  drop tcp_recv(0, 1);
-  drop to_json(1);
-  drop from_json("{}");
-  drop sha256("x");
-  drop hmac_sha256("k", "x");
-  drop env_get("HOME");
-  drop cwd();
-  drop file_exists("x");
-  drop file_remove("x");
+  let xs = list_new();
+  drop list_push(xs, 1);
+  drop list_set(xs, 0, 2);
+  drop list_get(xs, 0);
+  drop list_len(xs);
+  let m = map_new();
+  drop map_set(m, 1, 2);
+  drop map_has(m, 1);
+  drop map_get(m, 1);
+  drop read_file("missing.txt");
+  drop write_file("tmp.txt", "x");
+  drop file_exists("tmp.txt");
+  drop file_remove("tmp.txt");
   drop tcp_connect("127.0.0.1:1");
   drop tcp_send(0, "x");
+  drop tcp_recv(0, 8);
   drop tcp_close(0);
+  drop to_json(1);
+  drop from_json("1");
+  drop sha256("abc");
+  drop hmac_sha256("k", "v");
+  drop env_get("HOME");
+  drop cwd();
+  drop proc_run("true");
   drop now_unix();
   drop monotonic_ms();
-  drop len(1);
-  drop proc_run("true");
-  drop write_file("a", "b");
   drop sleep_ms(1);
   return 0;
 }
 """
-    prog = parse(src)
-    analyze(prog)
-    asm = to_x86_64(prog)
-    assert_valid_x86_64_assembly(asm)
+    mod = to_llvm_ir(parse(src))
+    assert_valid_llvm_ir(mod)
+    for sym in (
+        "astra_spawn_store",
+        "astra_join",
+        "astra_args",
+        "astra_arg",
+        "astra_list_new",
+        "astra_map_new",
+        "astra_read_file",
+        "astra_write_file",
+        "astra_file_exists",
+        "astra_tcp_connect",
+        "astra_to_json",
+        "astra_sha256",
+        "astra_env_get",
+        "astra_cwd",
+        "astra_proc_run",
+        "astra_now_unix",
+        "astra_sleep_ms",
+    ):
+        assert sym in mod
 
 
-def test_x86_64_supports_float_mod_and_compound_mod_assign():
-    src = """
-fn main() -> Int {
-  let mut x = 7.5;
-  x %= 2.0;
-  if x > 1.4 && x < 1.6 {
-    return 1;
-  }
-  return 0;
-}
-"""
-    prog = parse(src)
-    analyze(prog)
-    asm = to_x86_64(prog)
-    assert_valid_x86_64_assembly(asm)
-    assert "call astra_fmod" in asm
+def test_llvm_cross_target_emission():
+    src = parse("fn main() -> Int { return 0; }")
+    for triple in (
+        "x86_64-unknown-linux-gnu",
+        "aarch64-unknown-linux-gnu",
+        "riscv64-unknown-linux-gnu",
+        "wasm32-unknown-unknown",
+    ):
+        mod = to_llvm_ir(src, triple=triple)
+        assert_valid_llvm_ir(mod, triple=triple)
 
 
 def test_join_of_unknown_tid_allowed_semantically():
@@ -612,19 +346,19 @@ fn main() -> Int {
     assert rc == 22
 
 
-def test_emit_ir_writes_json(tmp_path: Path):
+def test_emit_ir_writes_llvm_text(tmp_path: Path):
     src = tmp_path / "ir.astra"
     out = tmp_path / "ir.py"
-    ir = tmp_path / "ir.json"
+    ir = tmp_path / "ir.ll"
     src.write_text("fn main() -> Int { let x = 1 + 2; return x; }")
     build(str(src), str(out), "py", emit_ir=str(ir))
     text = ir.read_text()
-    assert '"name": "main"' in text
-    assert '"ops"' in text
+    assert "define i32 @main()" in text
+    assert "astra_run_py" not in text
 
 
-def test_runtime_assembly_exports_i128_helper_symbols():
-    text = Path("runtime/x86_64_linux_runtime.s").read_text()
+def test_runtime_c_exports_i128_helper_symbols():
+    text = Path("runtime/llvm_runtime.c").read_text()
     for sym in (
         "astra_i128_mul_wrap",
         "astra_i128_mul_trap",
@@ -639,4 +373,35 @@ def test_runtime_assembly_exports_i128_helper_symbols():
         "astra_u128_mod_wrap",
         "astra_u128_mod_trap",
     ):
-        assert f"global {sym}" in text
+        assert sym in text
+
+
+def test_runtime_c_exports_extended_builtin_symbols():
+    text = Path("runtime/llvm_runtime.c").read_text()
+    for sym in (
+        "astra_len_any",
+        "astra_len_str",
+        "astra_read_file",
+        "astra_write_file",
+        "astra_args",
+        "astra_arg",
+        "astra_spawn_store",
+        "astra_join",
+        "astra_list_new",
+        "astra_list_push",
+        "astra_map_new",
+        "astra_map_has",
+        "astra_file_exists",
+        "astra_tcp_connect",
+        "astra_to_json",
+        "astra_from_json",
+        "astra_sha256",
+        "astra_hmac_sha256",
+        "astra_env_get",
+        "astra_cwd",
+        "astra_proc_run",
+        "astra_now_unix",
+        "astra_monotonic_ms",
+        "astra_sleep_ms",
+    ):
+        assert sym in text

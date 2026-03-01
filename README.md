@@ -1,6 +1,6 @@
 # Astra Language Ecosystem
 
-Astra is a compact language ecosystem with deterministic builds, Python and x86-64 backends, package tooling, formatting/linting, docs generation, LSP, debugging/profiling, and a batteries-included stdlib.
+Astra is a compact language ecosystem with deterministic builds, Python and LLVM backends, package tooling, formatting/linting, docs generation, LSP, debugging/profiling, and a batteries-included stdlib.
 
 ## Quick start
 
@@ -22,10 +22,10 @@ python build/hello.py
 - `astprof`: profiler
 
 ## Build options
-- `astra build <in> -o <out> [--target py|x86_64|native] [--emit-ir path.json] [--strict] [--freestanding] [--profile debug|release] [--overflow trap|wrap|debug]`
+- `astra build <in> -o <out> [--target py|llvm|native] [--emit-ir path.ll] [--strict] [--freestanding] [--profile debug|release] [--overflow trap|wrap|debug] [--triple <llvm-triple>]`
 - `astra check <in> [--freestanding] [--overflow trap|wrap|debug]`
 - `astra test [--kind unit|integration|e2e]`
-- `--target native` assembles/links x86-64 output into an executable (requires `nasm` and a linker driver such as `cc`/`gcc`/`clang`, fallback `ld`).
+- `--target native` compiles/links LLVM IR into an executable via `clang` and the portable runtime (`runtime/llvm_runtime.c`).
 
 ## Syntax notes
 - Immutable locals use `fixed`, mutable/inferred locals use `let`.
@@ -37,10 +37,10 @@ python build/hello.py
 - Explicit cast syntax: `expr as Type`.
 - Layout/type queries: `sizeof(Type)`, `alignof(Type)`, `size_of(expr)`, `align_of(expr)`, `bitSizeOf(Type)`, `maxVal(Type)`, `minVal(Type)`.
 - Width-aware integer bit builtins: `countOnes(x)`, `leadingZeros(x)`, `trailingZeros(x)`.
-- Packed structs are supported via `@packed struct Name { ... }` (x86-64 packed field backend path currently supports up to 64-bit fields).
+- Packed structs are supported via `@packed struct Name { ... }` (current backend contract supports packed integer fields up to 64 bits).
 - Freestanding builds avoid hosted entrypoint assumptions and are suitable for kernels/runtime stubs.
 - `defer expr;` runs cleanup logic at function exit.
 - `a ?? b` coalesces `Option<T>` values (`a: Option<T>`, `b: T`).
 - Bare expression statements must be `Void`/`Never`; use `drop expr;` to discard other values.
-- x86-64 backend now uses an explicit ABI lowering table (integer/pointer vs SSE classes), stack args beyond register limits, indirect fn-pointer calls, and runtime ABI symbols for lowered builtins.
-- `i128/u128` are supported end-to-end on x86-64 with split register returns (`rax`/`rdx`) and runtime helper ABI for hard ops (`mul/div/mod`).
+- LLVM backend emits validated LLVM IR through `llvmlite` and native builds are performed by `clang`.
+- `i128/u128` helper runtime symbols remain available in the portable runtime for trap/wrap hard-op behavior.

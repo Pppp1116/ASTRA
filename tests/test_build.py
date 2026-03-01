@@ -21,11 +21,13 @@ def test_build_emit_ir(tmp_path: Path):
     src = tmp_path / "a.astra"
     src.write_text("fn main() -> Int { let x = 1 + 2; return x; }")
     out = tmp_path / "a.py"
-    ir = tmp_path / "a.ir.json"
+    ir = tmp_path / "a.ll"
     st = build(str(src), str(out), "py", emit_ir=str(ir))
     assert st in {"built", "cached"}
     assert ir.exists()
-    assert '"name": "main"' in ir.read_text()
+    text = ir.read_text()
+    assert "define i32 @main()" in text
+    assert "astra_run_py" not in text
 
 
 def test_build_cache_invalidates_when_imported_module_changes(tmp_path: Path):
@@ -80,8 +82,8 @@ fn main() -> Int {
 
 
 @pytest.mark.skipif(
-    shutil.which("nasm") is None or (shutil.which("cc") is None and shutil.which("ld") is None),
-    reason="native target requires nasm and a linker (cc/ld)",
+    shutil.which("clang") is None,
+    reason="native target requires clang",
 )
 def test_build_native_executable(tmp_path: Path):
     src = tmp_path / "main.astra"
@@ -96,8 +98,8 @@ def test_build_native_executable(tmp_path: Path):
 
 
 @pytest.mark.skipif(
-    shutil.which("nasm") is None or (shutil.which("cc") is None and shutil.which("ld") is None),
-    reason="native target requires nasm and a linker (cc/ld)",
+    shutil.which("clang") is None,
+    reason="native target requires clang",
 )
 def test_build_native_runtime_builtins_link_and_run(tmp_path: Path):
     src = tmp_path / "main.astra"
@@ -120,8 +122,8 @@ fn main() -> Int {
 
 
 @pytest.mark.skipif(
-    shutil.which("nasm") is None or (shutil.which("cc") is None and shutil.which("ld") is None),
-    reason="native target requires nasm and a linker (cc/ld)",
+    shutil.which("clang") is None,
+    reason="native target requires clang",
 )
 def test_build_native_runtime_panic_reports_message(tmp_path: Path):
     src = tmp_path / "panic.astra"
@@ -142,8 +144,8 @@ fn main() -> Int {
 
 
 @pytest.mark.skipif(
-    shutil.which("nasm") is None or (shutil.which("cc") is None and shutil.which("ld") is None),
-    reason="native target requires nasm and a linker (cc/ld)",
+    shutil.which("clang") is None,
+    reason="native target requires clang",
 )
 def test_build_native_supports_async_struct_and_defer_loop(tmp_path: Path):
     src = tmp_path / "combo.astra"
@@ -174,8 +176,8 @@ fn main() -> Int {
 
 
 @pytest.mark.skipif(
-    shutil.which("nasm") is None or (shutil.which("cc") is None and shutil.which("ld") is None),
-    reason="native target requires nasm and a linker (cc/ld)",
+    shutil.which("clang") is None,
+    reason="native target requires clang",
 )
 def test_build_native_supports_non_runtime_builtins(tmp_path: Path):
     src = tmp_path / "builtins.astra"
@@ -199,8 +201,143 @@ fn main() -> Int {
 
 
 @pytest.mark.skipif(
-    shutil.which("nasm") is None or (shutil.which("cc") is None and shutil.which("ld") is None),
-    reason="native target requires nasm and a linker (cc/ld)",
+    shutil.which("clang") is None,
+    reason="native target requires clang",
+)
+def test_build_native_supports_array_index_get_and_coalesce(tmp_path: Path):
+    src = tmp_path / "array_ops.astra"
+    out = tmp_path / "array_ops.exe"
+    src.write_text(
+        """
+fn main() -> Int {
+  let a = [10, 20, 30][1];
+  let b: Option<Int> = [1, 2, 3].get(2);
+  let c: Option<Int> = [1, 2].get(9);
+  return a + (b ?? 0) + (c ?? 7);
+}
+"""
+    )
+    st = build(str(src), str(out), "native")
+    assert st in {"built", "cached"}
+    cp = subprocess.run([str(out)], capture_output=True, text=True)
+    assert cp.returncode == 30
+
+
+@pytest.mark.skipif(
+    shutil.which("clang") is None,
+    reason="native target requires clang",
+)
+def test_build_native_supports_layout_queries(tmp_path: Path):
+    src = tmp_path / "layout.astra"
+    out = tmp_path / "layout.exe"
+    src.write_text(
+        """
+struct P { a Int, b u8 }
+fn main() -> Int {
+  let p = P(1, 2 as u8);
+  return sizeof(P) + alignof(P) + size_of(p.a) + align_of(p.b);
+}
+"""
+    )
+    st = build(str(src), str(out), "native")
+    assert st in {"built", "cached"}
+    cp = subprocess.run([str(out)], capture_output=True, text=True)
+    assert cp.returncode == 33
+
+
+@pytest.mark.skipif(
+    shutil.which("clang") is None,
+    reason="native target requires clang",
+)
+def test_build_native_supports_packed_struct_bitfield_ops(tmp_path: Path):
+    src = tmp_path / "packed.astra"
+    out = tmp_path / "packed.exe"
+    src.write_text(
+        """
+@packed struct Header { a: u4, b: u3, c: u1, d: u8 }
+fn main() -> Int {
+  let mut h = Header(3u4, 5u3, 1u1, 9u8);
+  h.a += 1u4;
+  h.d = 7u8;
+  return (h.a as Int) + (h.b as Int) + (h.c as Int) + (h.d as Int);
+}
+"""
+    )
+    st = build(str(src), str(out), "native")
+    assert st in {"built", "cached"}
+    cp = subprocess.run([str(out)], capture_output=True, text=True)
+    assert cp.returncode == 17
+
+
+@pytest.mark.skipif(
+    shutil.which("clang") is None,
+    reason="native target requires clang",
+)
+def test_build_native_supports_extended_runtime_builtins(tmp_path: Path):
+    src = tmp_path / "runtime_ext.astra"
+    out = tmp_path / "runtime_ext.exe"
+    tmpf = tmp_path / "io.txt"
+    src.write_text(
+        f"""
+fn worker(x: Int) -> Int {{ return x + 1; }}
+fn main() -> Int {{
+  drop args();
+  drop arg(0);
+  let t = spawn(worker, 1);
+  let tj = join(t) as Int;
+
+  let xs = list_new();
+  drop list_push(xs, 11);
+  drop list_push(xs, 22);
+  let a = list_len(xs);
+  let b = list_get(xs, 1) as Int;
+  drop list_set(xs, 0, 5);
+
+  let m = map_new();
+  drop map_set(m, 7, 9);
+  let mh = map_has(m, 7);
+  let mg = map_get(m, 7) as Int;
+  let mut bh = 0;
+  if mh {{
+    bh = 1;
+  }}
+
+  let js = to_json(123);
+  let n = from_json(js) as Int;
+  drop sha256(\"abc\");
+  drop hmac_sha256(\"k\", \"v\");
+  drop env_get(\"HOME\");
+  drop cwd();
+
+  let wf = write_file(\"{tmpf}\", \"x\");
+  let rf = len(read_file(\"{tmpf}\"));
+  let ex1 = file_exists(\"{tmpf}\") as Int;
+  drop file_remove(\"{tmpf}\");
+  let ex2 = file_exists(\"{tmpf}\") as Int;
+
+  let tc = tcp_connect(\"127.0.0.1:1\");
+  let ts = tcp_send(tc, \"x\");
+  let tr = len(tcp_recv(tc, 8));
+  let tcl = tcp_close(tc);
+
+  let pr = proc_run(\"true\");
+  drop now_unix();
+  drop monotonic_ms();
+  let sl = sleep_ms(1);
+
+  return a + b + bh + mg + n + wf + rf + ex1 + ex2 + tj + tc + ts + tr + tcl + pr + sl;
+}}
+"""
+    )
+    st = build(str(src), str(out), "native")
+    assert st in {"built", "cached"}
+    cp = subprocess.run([str(out)], capture_output=True, text=True)
+    assert cp.returncode == 160
+
+
+@pytest.mark.skipif(
+    shutil.which("clang") is None,
+    reason="native target requires clang",
 )
 def test_build_native_supports_float_mod(tmp_path: Path):
     src = tmp_path / "fmod.astra"
@@ -224,8 +361,8 @@ fn main() -> Int {
 
 
 @pytest.mark.skipif(
-    shutil.which("nasm") is None or (shutil.which("cc") is None and shutil.which("ld") is None),
-    reason="native target requires nasm and a linker (cc/ld)",
+    shutil.which("clang") is None,
+    reason="native target requires clang",
 )
 def test_build_native_supports_i128_hard_ops_with_runtime_helpers(tmp_path: Path):
     src = tmp_path / "i128.astra"

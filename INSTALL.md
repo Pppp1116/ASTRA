@@ -8,6 +8,10 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
+Requirements:
+- `clang` for `--target native`
+- `llvmlite` (installed via project dependency) for LLVM IR generation
+
 Verify:
 ```bash
 astra check examples/hello.astra

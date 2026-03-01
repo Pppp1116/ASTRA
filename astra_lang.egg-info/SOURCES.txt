@@ -12,10 +12,10 @@ astra/debugger.py
 astra/docgen.py
 astra/formatter.py
 astra/int_types.py
-astra/ir.py
 astra/layout.py
 astra/lexer.py
 astra/linter.py
+astra/llvm_codegen.py
 astra/lsp.py
 astra/optimizer.py
 astra/parser.py

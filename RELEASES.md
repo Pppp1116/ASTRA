@@ -1,5 +1,12 @@
 # Releases
 
+## v0.3.0
+- Replaced handwritten x86-64 backend with LLVM IR backend (`llvmlite`) and removed custom tuple-IR pipeline.
+- Added `llvm` build target and `--triple` support for LLVM/native builds.
+- Changed `--emit-ir` to emit textual LLVM IR (`.ll`).
+- Reworked native pipeline to `clang` + portable runtime C implementation (`runtime/llvm_runtime.c`).
+- Removed x86 runtime assembly source and x86-specific backend API (`to_x86_64`).
+
 ## v0.2.2
 - Added dynamic-width integer language support across lexer/parser/semantic/codegen (`iN`/`uN`, `N=1..128`) including literal suffixes (for example `15u4`).
 - Added `@packed struct` support with packed layout tracking and packed-field x86-64 access/update lowering.

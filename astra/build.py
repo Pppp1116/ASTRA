@@ -49,9 +49,9 @@ from astra.ast import (
     WhileStmt,
 )
 from astra.comptime import run_comptime
-from astra.codegen import to_python, to_x86_64
-from astra.ir import lower
-from astra.optimizer import optimize, optimize_program
+from astra.codegen import to_python
+from astra.llvm_codegen import to_llvm_ir
+from astra.optimizer import optimize_program
 from astra.parser import parse
 from astra.semantic import analyze
 
@@ -145,6 +145,7 @@ def _build_fingerprint(
     freestanding: bool,
     profile: str,
     overflow_mode: str,
+    triple: str | None,
 ) -> str:
     inputs = [
         {"path": p.as_posix(), "sha256": _sha256_file(p)}
@@ -158,6 +159,7 @@ def _build_fingerprint(
         "freestanding": bool(freestanding),
         "profile": profile,
         "overflow_mode": overflow_mode,
+        "triple": triple or "",
         "inputs": inputs,
         "toolchain": _toolchain_stamp(),
     }
@@ -353,40 +355,28 @@ def _strict_validate_program(prog: Program, src_file: Path) -> None:
         raise RuntimeError(f"CODEGEN {src_file}:1:1: strict mode rejected backend lowering: {details}")
 
 
-def _build_native_x86_64(asm: str, out_path: str, src_file: Path):
-    nasm = shutil.which("nasm")
-    cc = shutil.which("cc") or shutil.which("gcc") or shutil.which("clang")
-    ld = shutil.which("ld")
-    if nasm is None or (cc is None and ld is None):
-        raise RuntimeError(f"CODEGEN {src_file}:1:1: native target requires `nasm` and a linker (`cc`/`ld`) in PATH")
-    runtime_asm = Path(__file__).resolve().parent.parent / "runtime" / "x86_64_linux_runtime.s"
-    if not runtime_asm.exists():
-        raise RuntimeError(f"CODEGEN {src_file}:1:1: missing runtime object source at {runtime_asm}")
+def _build_native_llvm(ir_text: str, out_path: str, src_file: Path, *, profile: str, triple: str | None, freestanding: bool):
+    clang = shutil.which("clang")
+    if clang is None:
+        raise RuntimeError(f"CODEGEN {src_file}:1:1: native target requires `clang` in PATH")
+    runtime_c = Path(__file__).resolve().parent.parent / "runtime" / "llvm_runtime.c"
+    if not runtime_c.exists():
+        raise RuntimeError(f"CODEGEN {src_file}:1:1: missing runtime source at {runtime_c}")
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
+    opt_flag = "-O3" if profile == "release" else "-O0"
     with tempfile.TemporaryDirectory(prefix="astra-native-") as td:
-        asm_path = Path(td) / "module.s"
-        obj_path = Path(td) / "module.o"
-        rt_obj_path = Path(td) / "runtime.o"
-        asm_path.write_text(asm)
-        cp = subprocess.run([nasm, "-felf64", str(asm_path), "-o", str(obj_path)], capture_output=True, text=True)
+        ll_path = Path(td) / "module.ll"
+        ll_path.write_text(ir_text)
+        cmd = [clang, opt_flag, str(ll_path), str(runtime_c), "-lm", "-o", str(out)]
+        if triple:
+            cmd.insert(1, f"--target={triple}")
+        if freestanding:
+            cmd.extend(["-nostartfiles", "-Wl,-e,_start"])
+        cp = subprocess.run(cmd, capture_output=True, text=True)
         if cp.returncode != 0:
             detail = (cp.stderr or cp.stdout or "").strip()
-            raise RuntimeError(f"CODEGEN {src_file}:1:1: nasm failed{': ' + detail if detail else ''}")
-        cp = subprocess.run([nasm, "-felf64", str(runtime_asm), "-o", str(rt_obj_path)], capture_output=True, text=True)
-        if cp.returncode != 0:
-            detail = (cp.stderr or cp.stdout or "").strip()
-            raise RuntimeError(f"CODEGEN {src_file}:1:1: runtime assemble failed{': ' + detail if detail else ''}")
-        if cc is not None:
-            cp = subprocess.run([cc, "-nostdlib", "-no-pie", str(obj_path), str(rt_obj_path), "-lgcc", "-o", str(out)], capture_output=True, text=True)
-            if cp.returncode != 0:
-                detail = (cp.stderr or cp.stdout or "").strip()
-                raise RuntimeError(f"CODEGEN {src_file}:1:1: link failed via cc{': ' + detail if detail else ''}")
-        else:
-            cp = subprocess.run([ld, str(obj_path), str(rt_obj_path), "-o", str(out)], capture_output=True, text=True)
-            if cp.returncode != 0:
-                detail = (cp.stderr or cp.stdout or "").strip()
-                raise RuntimeError(f"CODEGEN {src_file}:1:1: ld failed{': ' + detail if detail else ''}")
+            raise RuntimeError(f"CODEGEN {src_file}:1:1: clang link failed{': ' + detail if detail else ''}")
     out.chmod(out.stat().st_mode | 0o111)
 
 def build(
@@ -398,15 +388,16 @@ def build(
     freestanding: bool = False,
     profile: str = "debug",
     overflow: str = "debug",
+    triple: str | None = None,
 ):
     src_file = Path(src_path)
     if profile not in {"debug", "release"}:
         raise RuntimeError(f"BUILD {src_file}:1:1: unsupported profile {profile}")
     overflow_mode = _resolve_overflow_mode(profile, overflow, check=False)
-    digest = _build_fingerprint(src_file, target, emit_ir, strict, freestanding, profile, overflow_mode)
+    digest = _build_fingerprint(src_file, target, emit_ir, strict, freestanding, profile, overflow_mode, triple)
     cache_key = (
         f"{src_file.resolve().as_posix()}::{target}::{int(bool(strict))}::{int(bool(freestanding))}::"
-        f"{int(bool(emit_ir))}::{profile}::{overflow_mode}"
+        f"{int(bool(emit_ir))}::{profile}::{overflow_mode}::{triple or ''}"
     )
     cache = json.loads(CACHE.read_text()) if CACHE.exists() else {}
     if cache.get(cache_key) == digest and Path(out_path).exists():
@@ -418,22 +409,32 @@ def build(
     optimize_program(prog)
     if strict:
         _strict_validate_program(prog, src_file)
-    ir = optimize(lower(prog))
+    llvm_ir: str | None = None
+    if target in {"llvm", "native"} or emit_ir:
+        llvm_ir = to_llvm_ir(
+            prog,
+            freestanding=freestanding,
+            overflow_mode=overflow_mode,
+            triple=triple,
+            profile=profile,
+        )
     if emit_ir:
+        assert llvm_ir is not None
         p = Path(emit_ir)
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps([{"name": f.name, "ops": f.ops} for f in ir.funcs], indent=2))
+        p.write_text(llvm_ir)
     if target == "py":
         out = to_python(prog, freestanding=freestanding, overflow_mode=overflow_mode)
         Path(out_path).parent.mkdir(parents=True, exist_ok=True)
         Path(out_path).write_text(out)
-    elif target == "x86_64":
-        out = to_x86_64(prog, freestanding=freestanding, overflow_mode=overflow_mode)
+    elif target == "llvm":
+        assert llvm_ir is not None
+        out = llvm_ir
         Path(out_path).parent.mkdir(parents=True, exist_ok=True)
         Path(out_path).write_text(out)
     elif target == "native":
-        asm = to_x86_64(prog, freestanding=freestanding, overflow_mode=overflow_mode)
-        _build_native_x86_64(asm, out_path, src_file)
+        assert llvm_ir is not None
+        _build_native_llvm(llvm_ir, out_path, src_file, profile=profile, triple=triple, freestanding=freestanding)
     else:
         raise RuntimeError(f"BUILD {src_file}:1:1: unsupported target {target}")
     cache[cache_key] = digest
