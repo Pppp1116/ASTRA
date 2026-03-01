@@ -69,18 +69,39 @@ def test_lsp_helpers_and_main_dispatch(monkeypatch):
     diags = astra.lsp._parse_diagnostics('fn main() -> Int { return "x"; }', "<mem>")
     assert diags
 
+    src = (
+        "fn add(x Int) -> Int { return x; }\n"
+        "struct S { v Int }\n"
+        "enum E { A }\n"
+        "fn main() -> Int {\n"
+        "  let y = add(1);\n"
+        "  return y;\n"
+        "}\n"
+    )
+
     sent = []
     msgs = iter(
         [
             {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
-            {"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {"textDocument": {"uri": "u", "text": "fn main() -> Int { return 0; }"}}},
+            {"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {"textDocument": {"uri": "u", "text": src}}},
             {
                 "jsonrpc": "2.0",
                 "id": 2,
                 "method": "textDocument/hover",
-                "params": {"textDocument": {"uri": "u"}, "position": {"line": 0, "character": 1}},
+                "params": {"textDocument": {"uri": "u"}, "position": {"line": 5, "character": 9}},
             },
-            {"jsonrpc": "2.0", "id": 3, "method": "textDocument/completion", "params": {}},
+            {
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "textDocument/completion",
+                "params": {"textDocument": {"uri": "u"}, "position": {"line": 5, "character": 3}},
+            },
+            {
+                "jsonrpc": "2.0",
+                "id": 4,
+                "method": "textDocument/definition",
+                "params": {"textDocument": {"uri": "u"}, "position": {"line": 4, "character": 10}},
+            },
             None,
         ]
     )
@@ -94,9 +115,13 @@ def test_lsp_helpers_and_main_dispatch(monkeypatch):
     monkeypatch.setattr(astra.lsp, "read_msg", fake_read)
     monkeypatch.setattr(astra.lsp, "send", fake_send)
     astra.lsp.main()
-    assert any(m.get("id") == 1 for m in sent)
-    assert any(m.get("id") == 2 for m in sent)
-    assert any(m.get("id") == 3 for m in sent)
+    by_id = {m.get("id"): m for m in sent if m.get("id") is not None}
+    assert by_id[1]["result"]["capabilities"]["definitionProvider"] is True
+    assert by_id[2]["result"]["contents"] == "`y`: `Int`"
+    labels = {x["label"] for x in by_id[3]["result"]}
+    assert {"y", "add", "S", "E", "print", "fn"} <= labels
+    assert by_id[4]["result"]["uri"] == "u"
+    assert by_id[4]["result"]["range"]["start"]["line"] == 0
 
 
 def test_debugger_and_profiler_and_runtime(tmp_path: Path):

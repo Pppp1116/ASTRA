@@ -326,3 +326,56 @@ def test_copy_values_are_usable_after_assignment():
 def test_slice_get_returns_option_type():
     src = "fn main() -> Int { let x: Option<Int> = [1, 2].get(0); return x ?? 0; }"
     analyze(parse(src))
+
+
+def test_owned_internal_use_after_free_reports_exact_location():
+    filename = "/tmp/owned_use_after_free.astra"
+    src = (
+        "fn main() -> Int {\n"
+        "  let p = alloc(8);\n"
+        "  free(p);\n"
+        "  free(p);\n"
+        "  return 0;\n"
+        "}\n"
+    )
+    try:
+        analyze(parse(src, filename=filename), filename=filename)
+        assert False
+    except SemanticError as e:
+        assert str(e) == "SEM /tmp/owned_use_after_free.astra:4:8: use-after-free of p"
+
+
+def test_owned_internal_use_after_move_reports_exact_location():
+    filename = "/tmp/owned_use_after_move.astra"
+    src = (
+        "fn main() -> Int {\n"
+        "  let p = alloc(8);\n"
+        "  let q = p;\n"
+        "  let r = p;\n"
+        "  return 0;\n"
+        "}\n"
+    )
+    try:
+        analyze(parse(src, filename=filename), filename=filename)
+        assert False
+    except SemanticError as e:
+        assert str(e) == "SEM /tmp/owned_use_after_move.astra:4:11: use-after-move of p"
+
+
+def test_owned_internal_reassignment_leak_reports_exact_location():
+    filename = "/tmp/owned_reassign_leak.astra"
+    src = (
+        "fn main() -> Int {\n"
+        "  let p = alloc(8);\n"
+        "  p = alloc(16);\n"
+        "  return 0;\n"
+        "}\n"
+    )
+    try:
+        analyze(parse(src, filename=filename), filename=filename)
+        assert False
+    except SemanticError as e:
+        assert str(e) == (
+            "SEM /tmp/owned_reassign_leak.astra:3:3: "
+            "reassignment would leak owned allocation in p; free or move it first"
+        )

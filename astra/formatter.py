@@ -2,7 +2,36 @@ import argparse
 from pathlib import Path
 
 from astra.ast import *
+from astra.parser import BIN_PREC as PARSER_BIN_PREC
 from astra.parser import ParseError, parse
+
+
+# Keep expression precedence aligned with parser behavior.
+FMT_BIN_PREC = dict(PARSER_BIN_PREC)
+_PREC_ATOM = 9
+_PREC_POSTFIX = 8
+_PREC_UNARY = 7
+
+
+def _expr_prec(e) -> int:
+    if isinstance(e, Binary):
+        return FMT_BIN_PREC[e.op]
+    if isinstance(e, (AwaitExpr, Unary)):
+        return _PREC_UNARY
+    if isinstance(e, (Call, IndexExpr, FieldExpr)):
+        return _PREC_POSTFIX
+    return _PREC_ATOM
+
+
+def _fmt_expr_with_prec(e, parent_prec: int = 0, right_child: bool = False) -> str:
+    text = _fmt_expr(e)
+    my_prec = _expr_prec(e)
+    if my_prec < parent_prec:
+        return f"({text})"
+    if isinstance(e, Binary) and right_child and my_prec == parent_prec:
+        # Parser makes binary operators left-associative; keep right-nested groups explicit.
+        return f"({text})"
+    return text
 
 
 def _fmt_expr(e) -> str:
@@ -17,17 +46,23 @@ def _fmt_expr(e) -> str:
     if isinstance(e, Name):
         return e.value
     if isinstance(e, AwaitExpr):
-        return f"await {_fmt_expr(e.expr)}"
+        return f"await {_fmt_expr_with_prec(e.expr, _PREC_UNARY)}"
     if isinstance(e, Unary):
-        return f"{e.op}{_fmt_expr(e.expr)}"
+        return f"{e.op}{_fmt_expr_with_prec(e.expr, _PREC_UNARY)}"
     if isinstance(e, Binary):
-        return f"{_fmt_expr(e.left)} {e.op} {_fmt_expr(e.right)}"
+        p = FMT_BIN_PREC[e.op]
+        left = _fmt_expr_with_prec(e.left, p, right_child=False)
+        right = _fmt_expr_with_prec(e.right, p, right_child=True)
+        return f"{left} {e.op} {right}"
     if isinstance(e, Call):
-        return f"{_fmt_expr(e.fn)}({', '.join(_fmt_expr(a) for a in e.args)})"
+        fn = _fmt_expr_with_prec(e.fn, _PREC_POSTFIX)
+        return f"{fn}({', '.join(_fmt_expr(a) for a in e.args)})"
     if isinstance(e, IndexExpr):
-        return f"{_fmt_expr(e.obj)}[{_fmt_expr(e.index)}]"
+        obj = _fmt_expr_with_prec(e.obj, _PREC_POSTFIX)
+        return f"{obj}[{_fmt_expr(e.index)}]"
     if isinstance(e, FieldExpr):
-        return f"{_fmt_expr(e.obj)}.{e.field}"
+        obj = _fmt_expr_with_prec(e.obj, _PREC_POSTFIX)
+        return f"{obj}.{e.field}"
     if isinstance(e, ArrayLit):
         return f"[{', '.join(_fmt_expr(x) for x in e.elements)}]"
     return "/* unsupported */"

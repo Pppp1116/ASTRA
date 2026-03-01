@@ -96,6 +96,17 @@ class BuiltinSig:
     ret: str
 
 
+@dataclass(frozen=True)
+class Span:
+    filename: str
+    line: int
+    col: int
+
+    @classmethod
+    def at(cls, filename: str, line: int, col: int) -> "Span":
+        return cls(filename=filename, line=line, col=col)
+
+
 BUILTIN_SIGS: dict[str, BuiltinSig] = {
     "print": BuiltinSig(["Any"], "Void"),
     "len": BuiltinSig(["Any"], "Int"),
@@ -157,29 +168,29 @@ class _OwnedState:
     def track_alloc(self, name: str):
         self.owners[name] = "alive"
 
-    def move(self, src: str, dst: str):
-        self._require_alive(src)
+    def move(self, src: str, dst: str, span: Span):
+        self._require_alive(src, span)
         self.owners[src] = "moved"
         self.owners[dst] = "alive"
 
-    def free(self, name: str):
-        self._require_alive(name)
+    def free(self, name: str, span: Span):
+        self._require_alive(name, span)
         self.owners[name] = "freed"
 
     def invalidate(self, name: str):
         if name in self.owners and self.owners[name] == "alive":
             self.owners[name] = "moved"
 
-    def assign_name(self, dst: str, src: str):
+    def assign_name(self, dst: str, src: str, span: Span):
         if src in self.owners:
-            self.move(src, dst)
+            self.move(src, dst, span)
             return
         if dst in self.owners:
-            self._require_reassigned_after_drop(dst)
+            self._require_reassigned_after_drop(dst, span)
 
-    def check_use(self, name: str):
+    def check_use(self, name: str, span: Span):
         if name in self.owners:
-            self._require_alive(name)
+            self._require_alive(name, span)
 
     def check_no_live_leaks(self, fn_name: str, filename: str, line: int, col: int):
         leaked = sorted(k for k, v in self.owners.items() if v == "alive")
@@ -202,17 +213,19 @@ class _OwnedState:
                 merged[k] = "moved"
         self.owners = merged
 
-    def _require_alive(self, name: str):
+    def _require_alive(self, name: str, span: Span):
         st = self.owners.get(name)
         if st == "freed":
-            raise SemanticError(f"SEM <input>:1:1: use-after-free of {name}")
+            raise SemanticError(_diag(span.filename, span.line, span.col, f"use-after-free of {name}"))
         if st == "moved":
-            raise SemanticError(f"SEM <input>:1:1: use-after-move of {name}")
+            raise SemanticError(_diag(span.filename, span.line, span.col, f"use-after-move of {name}"))
 
-    def _require_reassigned_after_drop(self, name: str):
+    def _require_reassigned_after_drop(self, name: str, span: Span):
         st = self.owners.get(name)
         if st == "alive":
-            raise SemanticError(f"SEM <input>:1:1: reassignment would leak owned allocation in {name}; free or move it first")
+            raise SemanticError(
+                _diag(span.filename, span.line, span.col, f"reassignment would leak owned allocation in {name}; free or move it first")
+            )
 
 
 @dataclass
@@ -785,7 +798,7 @@ def _check_stmt(
                 elif st.expr.value in ref_param_names:
                     borrow.ref_origins[st.name] = st.expr.value
         if isinstance(st.expr, Name):
-            owned.assign_name(st.name, st.expr.value)
+            owned.assign_name(st.name, st.expr.value, Span.at(filename, st.line, st.col))
         _consume_if_move_name(st.expr, ty, move, filename, st.line, st.col)
         if _is_alloc_call(st.expr):
             owned.track_alloc(st.name)
@@ -827,9 +840,9 @@ def _check_stmt(
             else:
                 borrow.release_ref(st.target.value)
             if isinstance(st.expr, Name):
-                owned.assign_name(st.target.value, st.expr.value)
+                owned.assign_name(st.target.value, st.expr.value, Span.at(filename, st.line, st.col))
             else:
-                owned._require_reassigned_after_drop(st.target.value)
+                owned._require_reassigned_after_drop(st.target.value, Span.at(filename, st.line, st.col))
             _consume_if_move_name(st.expr, rhs, move, filename, st.line, st.col)
             _assign(st.target.value, lhs, scopes, filename, st.line, st.col)
             move.reinitialize(st.target.value)
@@ -1092,7 +1105,7 @@ def _check_stmt(
             ptr = st.expr.args[0]
             if not isinstance(ptr, Name):
                 raise SemanticError(_diag(filename, st.line, st.col, "free() expects a named owner"))
-            owned.free(ptr.value)
+            owned.free(ptr.value, Span.at(filename, st.line, st.col))
         return
     if isinstance(st, DropStmt):
         expr_ty = _infer(st.expr, scopes, fixed_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name)
@@ -1100,12 +1113,12 @@ def _check_stmt(
         if isinstance(st.expr, Name):
             if st.expr.value in owned.owners:
                 setattr(st, "drop_free", True)
-                owned.free(st.expr.value)
+                owned.free(st.expr.value, Span.at(filename, st.line, st.col))
         if _is_free_call(st.expr):
             ptr = st.expr.args[0]
             if not isinstance(ptr, Name):
                 raise SemanticError(_diag(filename, st.line, st.col, "free() expects a named owner"))
-            owned.free(ptr.value)
+            owned.free(ptr.value, Span.at(filename, st.line, st.col))
         return
 
 
@@ -1140,7 +1153,7 @@ def _infer(
             move.check_use(e.value, filename, e.line, e.col)
             borrow.check_read(e.value, filename, e.line, e.col)
             if owned is not None:
-                owned.check_use(e.value)
+                owned.check_use(e.value, Span.at(filename, e.line, e.col))
             return _typed(e, local)
         if e.value in fn_groups:
             if len(fn_groups[e.value]) > 1:
@@ -1166,7 +1179,7 @@ def _infer(
             if owner_ty is None:
                 raise SemanticError(_diag(filename, e.line, e.col, f"cannot borrow undefined name {owner}"))
             if owned is not None:
-                owned.check_use(owner)
+                owned.check_use(owner, Span.at(filename, e.line, e.col))
             fixed_owner = bool(_lookup_fixed(owner, fixed_scopes))
             borrow.ensure_can_borrow(owner, e.op == "&mut", fixed_owner, filename, e.line, e.col)
             if e.op == "&mut":
