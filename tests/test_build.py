@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+import astra.build as build_mod
 from astra.build import build
 
 
@@ -25,6 +26,57 @@ def test_build_emit_ir(tmp_path: Path):
     assert st in {"built", "cached"}
     assert ir.exists()
     assert '"name": "main"' in ir.read_text()
+
+
+def test_build_cache_invalidates_when_imported_module_changes(tmp_path: Path):
+    src = tmp_path / "main.astra"
+    dep = tmp_path / "helper.astra"
+    out = tmp_path / "main.py"
+    dep.write_text("fn helper() -> Int { return 1; }")
+    src.write_text(
+        """
+import helper;
+fn main() -> Int { return 0; }
+"""
+    )
+    st1 = build(str(src), str(out), "py")
+    st2 = build(str(src), str(out), "py")
+    dep.write_text("fn helper() -> Int { return 2; }")
+    st3 = build(str(src), str(out), "py")
+    assert st1 in {"built", "cached"}
+    assert st2 == "cached"
+    assert st3 == "built"
+
+
+def test_build_cache_invalidates_when_toolchain_stamp_changes(monkeypatch, tmp_path: Path):
+    src = tmp_path / "main.astra"
+    out = tmp_path / "main.py"
+    src.write_text("fn main() -> Int { return 0; }")
+    monkeypatch.setattr(build_mod, "_toolchain_stamp", lambda: "toolchain-A")
+    st1 = build(str(src), str(out), "py")
+    st2 = build(str(src), str(out), "py")
+    monkeypatch.setattr(build_mod, "_toolchain_stamp", lambda: "toolchain-B")
+    st3 = build(str(src), str(out), "py")
+    assert st1 in {"built", "cached"}
+    assert st2 == "cached"
+    assert st3 == "built"
+
+
+def test_build_strict_mode_does_not_reject_empty_blocks(tmp_path: Path):
+    src = tmp_path / "strict.astra"
+    out = tmp_path / "strict.py"
+    src.write_text(
+        """
+fn main() -> Int {
+  if true {
+  } else {
+  }
+  return 0;
+}
+"""
+    )
+    st = build(str(src), str(out), "py", strict=True)
+    assert st in {"built", "cached"}
 
 
 @pytest.mark.skipif(

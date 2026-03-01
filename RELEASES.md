@@ -6,6 +6,9 @@
   - Added native lowering for `match`, `await`, broader `defer` forms (including loops), and pointer-deref assignments.
   - Added aggregate pointer-handle lowering for struct/dynamic values across calls/returns.
   - Added struct constructor/field lowering and array/slice index + `.get()` lowering paths.
+- Build/cache reliability improvements:
+  - Cache fingerprint now includes transitive imported source contents, stdlib/runtime/toolchain stamp, and build-mode dimensions.
+  - Strict mode now performs structural backend-AST validation instead of scanning generated text for `"pass\\n"`.
 - Added end-to-end native regression tests for runtime symbols and expanded x86 codegen coverage.
 
 ## v0.2.0
