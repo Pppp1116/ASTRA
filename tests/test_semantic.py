@@ -270,6 +270,81 @@ def test_dynamic_integer_width_requires_explicit_cast_for_mixed_widths():
         assert "matching integer types" in str(e)
 
 
+def test_dynamic_integer_width_assignment_requires_explicit_cast():
+    src = "fn main() -> Int { let x: u8 = 1u4; return x as Int; }"
+    try:
+        analyze(parse(src))
+        assert False
+    except SemanticError as e:
+        assert "cannot implicitly convert u4 to u8, use explicit cast" in str(e)
+
+
+def test_semantic_supports_bit_intrinsics_for_integer_types():
+    src = """
+fn main() -> Int {
+  let a = bitSizeOf(u3);
+  let b: u4 = maxVal(u4);
+  let c: i4 = minVal(i4);
+  return a + (b as Int) + (c as Int);
+}
+"""
+    analyze(parse(src))
+
+
+def test_semantic_supports_bit_intrinsics_for_arbitrary_integer_widths():
+    src = """
+fn main() -> Int {
+  let x: u4 = 3u4;
+  let a = countOnes(x);
+  let b = leadingZeros(x);
+  let c = trailingZeros(x);
+  return a + b + c;
+}
+"""
+    analyze(parse(src))
+
+
+def test_semantic_rejects_bit_intrinsics_on_non_integer_type():
+    src = "fn main() -> Int { return countOnes(1.5); }"
+    try:
+        analyze(parse(src))
+        assert False
+    except SemanticError as e:
+        assert "expects an integer argument" in str(e)
+
+
+def test_semantic_rejects_maxval_on_non_integer_type():
+    src = "fn main() -> Int { let x = maxVal(Float); return 0; }"
+    try:
+        analyze(parse(src))
+        assert False
+    except SemanticError as e:
+        assert "maxVal expects an integer type" in str(e)
+
+
+def test_semantic_rejects_signed_i1_with_hint():
+    src = "fn main() -> Int { let x: i1 = 0 as i1; return x as Int; }"
+    try:
+        analyze(parse(src))
+        assert False
+    except SemanticError as e:
+        assert "did you mean u1" in str(e)
+
+
+def test_semantic_restricts_packed_struct_fields_to_integer_or_bool():
+    src = """
+@packed struct Bad {
+  x: Float,
+}
+fn main() -> Int { return 0; }
+"""
+    try:
+        analyze(parse(src))
+        assert False
+    except SemanticError as e:
+        assert "packed struct fields must be integer or bool types" in str(e)
+
+
 def test_layout_query_semantics_for_type_and_value_forms():
     src = "struct P { a Int, b u8 } fn main() -> Int { let p = P(1, 2 as u8); return sizeof(P) + alignof(P) + size_of(p.a) + align_of(p.b); }"
     analyze(parse(src))

@@ -30,11 +30,14 @@ python build/hello.py
 ## Syntax notes
 - Immutable locals use `fixed`, mutable/inferred locals use `let`.
 - Preferred typed style is `name: Type` (legacy `name Type` still parses for params/fields).
-- Integer-width aliases are available: `i8/u8/i16/u16/i32/u32/i64/u64/i128/u128/isize/usize`.
+- Integer types support dynamic widths: `iN`/`uN` where `N` is `1..128` (`Int`/`isize`/`usize` still map to 64-bit).
+- Integer literals support width suffixes (for example `15u4`, `3i7`).
 - Optional values use `Option<T>` + `none` (with `T?` sugar); `Nil` is not a type.
 - `Never` is coercible to any type; `return;` is valid only in `-> Void` functions.
 - Explicit cast syntax: `expr as Type`.
-- Layout query expressions: `sizeof(Type)`, `alignof(Type)`, `size_of(expr)`, `align_of(expr)`.
+- Layout/type queries: `sizeof(Type)`, `alignof(Type)`, `size_of(expr)`, `align_of(expr)`, `bitSizeOf(Type)`, `maxVal(Type)`, `minVal(Type)`.
+- Width-aware integer bit builtins: `countOnes(x)`, `leadingZeros(x)`, `trailingZeros(x)`.
+- Packed structs are supported via `@packed struct Name { ... }` (x86-64 packed field backend path currently supports up to 64-bit fields).
 - Freestanding builds avoid hosted entrypoint assumptions and are suitable for kernels/runtime stubs.
 - `defer expr;` runs cleanup logic at function exit.
 - `a ?? b` coalesces `Option<T>` values (`a: Option<T>`, `b: T`).

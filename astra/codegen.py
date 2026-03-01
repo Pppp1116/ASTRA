@@ -163,6 +163,24 @@ def to_python(prog: Program, freestanding: bool = False, overflow_mode: str = "t
         "def now_unix(): return int(time.time())",
         "def monotonic_ms(): return int(time.monotonic() * 1000)",
         "def sleep_ms(ms): time.sleep(max(0, int(ms)) / 1000.0); return 0",
+        "def countOnes(x, bits=64):",
+        "    width = max(1, int(bits))",
+        "    v = int(x) & ((1 << width) - 1)",
+        "    return v.bit_count()",
+        "def leadingZeros(x, bits=64):",
+        "    width = max(1, int(bits))",
+        "    v = int(x) & ((1 << width) - 1)",
+        "    if v == 0: return width",
+        "    return max(0, width - v.bit_length())",
+        "def trailingZeros(x, bits=64):",
+        "    width = max(1, int(bits))",
+        "    v = int(x) & ((1 << width) - 1)",
+        "    if v == 0: return width",
+        "    tz = 0",
+        "    while (v & 1) == 0:",
+        "        v >>= 1",
+        "        tz += 1",
+        "    return tz",
         "def __list_new(): return list_new()",
         "def __list_push(xs, v): return list_push(xs, v)",
         "def __list_get(xs, i): return list_get(xs, i)",
@@ -189,6 +207,9 @@ def to_python(prog: Program, freestanding: bool = False, overflow_mode: str = "t
         "def __now_unix(): return now_unix()",
         "def __monotonic_ms(): return monotonic_ms()",
         "def __sleep_ms(ms): return sleep_ms(ms)",
+        "def __countOnes(x, bits=64): return countOnes(x, bits)",
+        "def __leadingZeros(x, bits=64): return leadingZeros(x, bits)",
+        "def __trailingZeros(x, bits=64): return trailingZeros(x, bits)",
         "def _astra_load_lib(name):",
         "    if name not in _astra_libs:",
         "        _astra_libs[name] = ctypes.CDLL(name)",
@@ -271,21 +292,23 @@ def _emit_py_extern(item: ExternFnDecl) -> list[str]:
     lines.append(f"    _fn = getattr(_lib, {item.name!r})")
     call_args: list[str] = []
     for i, (name, typ) in enumerate(item.params):
-        if typ == "String":
+        t = type_text(typ)
+        if t == "String":
             lines.append(f"    _s{i} = str({name}).encode()")
             call_args.extend([f"_s{i}", f"len(_s{i})"])
         else:
             call_args.append(name)
-    if item.ret == "Int":
+    ret_ty = type_text(item.ret)
+    if ret_ty == "Int":
         lines.append("    _fn.restype = ctypes.c_longlong")
-    elif item.ret == "Bool":
+    elif ret_ty == "Bool":
         lines.append("    _fn.restype = ctypes.c_int")
-    elif item.ret == "String":
+    elif ret_ty == "String":
         lines.append("    _fn.restype = ctypes.c_char_p")
     lines.append(f"    _ret = _fn({', '.join(call_args)})")
-    if item.ret == "String":
+    if ret_ty == "String":
         lines.append("    return _ret.decode() if _ret is not None else ''")
-    elif item.ret == "Bool":
+    elif ret_ty == "Bool":
         lines.append("    return bool(_ret)")
     else:
         lines.append("    return _ret")
@@ -299,6 +322,19 @@ def _call_name(fn: Any) -> str:
     if isinstance(fn, str):
         return fn
     return _expr(fn)
+
+
+def _known_py_int_bits(e: Any) -> int:
+    inferred = getattr(e, "inferred_type", None)
+    if isinstance(inferred, str):
+        info = parse_int_type_name(_canonical_type(inferred))
+        if info is not None:
+            return info[0]
+    if isinstance(e, CastExpr):
+        info = parse_int_type_name(_canonical_type(e.type_name))
+        if info is not None:
+            return info[0]
+    return 64
 
 
 def _expr(e):
@@ -316,6 +352,29 @@ def _expr(e):
             return str(layout_of_type(e.type_name, _PY_STRUCTS, mode="query").align)
         except LayoutError as err:
             raise CodegenError(_diag(e, str(err))) from err
+    if isinstance(e, BitSizeOfTypeExpr):
+        try:
+            return str(layout_of_type(e.type_name, _PY_STRUCTS, mode="query").bits)
+        except LayoutError as err:
+            raise CodegenError(_diag(e, str(err))) from err
+    if isinstance(e, MaxValTypeExpr):
+        ty = _canonical_type(e.type_name)
+        info = parse_int_type_name(ty)
+        if info is None:
+            raise CodegenError(_diag(e, f"maxVal expects integer type, got {ty}"))
+        bits, signed = info
+        if signed:
+            return str((1 << (bits - 1)) - 1)
+        return str((1 << bits) - 1)
+    if isinstance(e, MinValTypeExpr):
+        ty = _canonical_type(e.type_name)
+        info = parse_int_type_name(ty)
+        if info is None:
+            raise CodegenError(_diag(e, f"minVal expects integer type, got {ty}"))
+        bits, signed = info
+        if signed:
+            return str(-(1 << (bits - 1)))
+        return "0"
     if isinstance(e, SizeOfValueExpr):
         ty = getattr(e, "query_type", None) or getattr(e.expr, "inferred_type", None)
         if not isinstance(ty, str):
@@ -339,7 +398,7 @@ def _expr(e):
     if isinstance(e, AwaitExpr):
         return f"await_result({_expr(e.expr)})"
     if isinstance(e, CastExpr):
-        return f"__astra_cast({_expr(e.expr)}, {e.type_name!r})"
+        return f"__astra_cast({_expr(e.expr)}, {_canonical_type(e.type_name)!r})"
     if isinstance(e, Unary):
         if e.op == "!":
             return f"(not {_expr(e.expr)})"
@@ -351,6 +410,9 @@ def _expr(e):
         return f"({_expr(e.left)} {op} {_expr(e.right)})"
     if isinstance(e, Call):
         name = e.resolved_name or _call_name(e.fn)
+        if name in {"countOnes", "__countOnes", "leadingZeros", "__leadingZeros", "trailingZeros", "__trailingZeros"} and len(e.args) == 1:
+            bits = _known_py_int_bits(e.args[0])
+            return f"{name}({_expr(e.args[0])}, {bits})"
         name = {"print": "print_", "len": "len_"}.get(name, name)
         return f"{name}({', '.join(_expr(a) for a in e.args)})"
     if isinstance(e, IndexExpr):
@@ -563,6 +625,9 @@ _BUILTIN_SIGS_X86: dict[str, _FnSig] = {
     "now_unix": _FnSig("now_unix", [], "Int"),
     "monotonic_ms": _FnSig("monotonic_ms", [], "Int"),
     "sleep_ms": _FnSig("sleep_ms", ["Int"], "Int"),
+    "countOnes": _FnSig("countOnes", ["Any"], "Int"),
+    "leadingZeros": _FnSig("leadingZeros", ["Any"], "Int"),
+    "trailingZeros": _FnSig("trailingZeros", ["Any"], "Int"),
 }
 
 for _n, _sig in list(_BUILTIN_SIGS_X86.items()):
@@ -676,13 +741,14 @@ def _fn_type(params: list[str], ret: str) -> str:
 
 
 def _canonical_type(typ: str) -> str:
-    if typ == "Bytes":
+    t = type_text(typ)
+    if t == "Bytes":
         return "Vec<u8>"
-    if typ.startswith("&mut "):
-        return f"&mut {_canonical_type(typ[5:])}"
-    if typ.startswith("&"):
-        return f"&{_canonical_type(typ[1:])}"
-    return typ
+    if t.startswith("&mut "):
+        return f"&mut {_canonical_type(t[5:])}"
+    if t.startswith("&"):
+        return f"&{_canonical_type(t[1:])}"
+    return t
 
 
 def _lower_abi_type(typ: str, node: Any, *, allow_memory: bool = True) -> _AbiType:
@@ -721,15 +787,15 @@ def _collect_fn_sigs(prog: Program) -> dict[str, _FnSig]:
         if isinstance(item, FnDecl):
             out[item.symbol or item.name] = _FnSig(
                 name=item.symbol or item.name,
-                params=[typ for _, typ in item.params],
-                ret=item.ret,
+                params=[type_text(typ) for _, typ in item.params],
+                ret=type_text(item.ret),
                 extern=False,
             )
         elif isinstance(item, ExternFnDecl):
             out[item.name] = _FnSig(
                 name=item.name,
-                params=[typ for _, typ in item.params],
-                ret=item.ret,
+                params=[type_text(typ) for _, typ in item.params],
+                ret=type_text(item.ret),
                 extern=True,
             )
     return out
@@ -819,7 +885,7 @@ def _x86_fn(
         epilogue=f".L_{fn_name}_epilogue",
         fn_sig=sig,
         fn_sigs=fn_sigs,
-        local_types={name: typ for name, typ in fn.params},
+        local_types={name: type_text(typ) for name, typ in fn.params},
         module_ctx=module_ctx,
         structs=structs,
         overflow_mode=overflow_mode,
@@ -1015,8 +1081,12 @@ def _expr_type(e: Any, ctx: _FnCtx) -> str:
         return _expr_type(e.expr, ctx)
     if isinstance(e, CastExpr):
         return _canonical_type(e.type_name)
-    if isinstance(e, (SizeOfTypeExpr, AlignOfTypeExpr, SizeOfValueExpr, AlignOfValueExpr)):
+    if isinstance(e, (SizeOfTypeExpr, AlignOfTypeExpr, BitSizeOfTypeExpr, SizeOfValueExpr, AlignOfValueExpr)):
         return "Int"
+    if isinstance(e, MaxValTypeExpr):
+        return _canonical_type(e.type_name)
+    if isinstance(e, MinValTypeExpr):
+        return _canonical_type(e.type_name)
     if isinstance(e, Binary):
         if e.op in {"==", "!=", "<", "<=", ">", ">=", "&&", "||"}:
             return "Bool"
@@ -1312,7 +1382,7 @@ def _load_ptr_value(ptr_reg: str, abi: _AbiType) -> list[str]:
     raise CodegenError(f"unhandled load class {abi.cls}")
 
 
-def _struct_field_info(struct_name: str, field: str, ctx: _FnCtx, node: Any) -> tuple[int, str]:
+def _struct_field_info(struct_name: str, field: str, ctx: _FnCtx, node: Any) -> tuple[int, int, int, str, bool]:
     decl = ctx.structs.get(struct_name)
     if decl is None:
         raise CodegenError(_diag(node, f"unknown struct type {struct_name} on x86_64 backend"))
@@ -1322,8 +1392,49 @@ def _struct_field_info(struct_name: str, field: str, ctx: _FnCtx, node: Any) -> 
         raise CodegenError(_diag(node, str(err))) from err
     for idx, (fname, fty) in enumerate(decl.fields):
         if fname == field:
-            return lay.field_offsets.get(fname, idx * 8), fty
+            bit_off = lay.field_bit_offsets.get(fname, lay.field_offsets.get(fname, idx * 8) * 8)
+            bits = lay.field_bits.get(fname, lay.field_layouts.get(fname).bits if fname in lay.field_layouts else 8)
+            return lay.field_offsets.get(fname, idx * 8), bit_off % 8, bits, fty, lay.packed
     raise CodegenError(_diag(node, f"struct {struct_name} has no field {field}"))
+
+
+def _load_packed_int_field(ptr_reg: str, byte_off: int, bit_off: int, bits: int, abi: _AbiType) -> list[str]:
+    total_bits = bit_off + bits
+    byte_count = max(1, (total_bits + 7) // 8)
+    if byte_count > 8:
+        raise CodegenError(f"packed field width {bits} with bit offset {bit_off} exceeds current 64-bit packed backend support")
+    code = [f"  lea r11, [{ptr_reg}+{byte_off}]"]
+    code += _load_n_bytes_to_reg(lambda i: _ptr_byte_ref("r11", i), byte_count, "rax")
+    if bit_off > 0:
+        code.append(f"  shr rax, {bit_off}")
+    code += _normalize_int_result(_AbiType(abi.src, abi.repr_name, "int", size=max(1, int_storage_size(bits)), align=max(1, int_storage_align(max(1, int_storage_size(bits)))), signed=abi.signed, bits=bits))
+    return code
+
+
+def _store_packed_int_field(ptr_reg: str, byte_off: int, bit_off: int, bits: int) -> list[str]:
+    total_bits = bit_off + bits
+    byte_count = max(1, (total_bits + 7) // 8)
+    if byte_count > 8:
+        raise CodegenError(f"packed field width {bits} with bit offset {bit_off} exceeds current 64-bit packed backend support")
+    mask = (1 << bits) - 1
+    window_mask = (mask << bit_off) & ((1 << (byte_count * 8)) - 1)
+    clear_mask = ((1 << (byte_count * 8)) - 1) ^ window_mask
+    code = ["  mov r10, rax", f"  lea r11, [{ptr_reg}+{byte_off}]"]
+    code += _load_n_bytes_to_reg(lambda i: _ptr_byte_ref("r11", i), byte_count, "rbx")
+    code += [
+        "  mov rax, r10",
+        f"  mov rcx, {_u64_imm(mask)}",
+        "  and rax, rcx",
+    ]
+    if bit_off > 0:
+        code.append(f"  shl rax, {bit_off}")
+    code += [
+        f"  mov rcx, {_u64_imm(clear_mask)}",
+        "  and rbx, rcx",
+        "  or rbx, rax",
+    ]
+    code += _store_n_bytes_from_reg(lambda i: _ptr_byte_ref("r11", i), byte_count, "rbx")
+    return code
 
 
 def _array_like_elem_type(obj_ty: str) -> str | None:
@@ -1530,11 +1641,63 @@ def _x86_stmt(st: Any, ctx: _FnCtx) -> list[str]:
             raise CodegenError(_diag(st, f"unsupported assignment type {lhs_type} on x86_64 backend"))
         if isinstance(st.target, FieldExpr):
             obj_ty = _canonical_type(_strip_ref_type(_expr_type(st.target.obj, ctx)))
-            field_off, lhs_type = _struct_field_info(obj_ty, st.target.field, ctx, st.target)
+            field_off, field_bit_off, field_bits, lhs_type, field_packed = _struct_field_info(obj_ty, st.target.field, ctx, st.target)
             lhs_abi = _lower_abi_type(lhs_type, st.target, allow_memory=False)
             obj_code, obj_abi = _x86_expr(st.target.obj, ctx, expected=_AbiType("usize", "ptr", "int"))
             obj_code, _ = _coerce_value(obj_code, obj_abi, _AbiType("usize", "ptr", "int"), st.target)
             ptr_slot = _alloc_temp_slot(ctx, _AbiType("usize", "ptr", "int"))
+            if field_packed:
+                if lhs_abi.cls != "int":
+                    raise CodegenError(_diag(st, f"packed field assignment requires integer/bool type, got {lhs_type}"))
+                if field_bits > 64:
+                    raise CodegenError(_diag(st, f"packed field width {field_bits} exceeds current backend limit of 64 bits"))
+                int_abi = _AbiType(
+                    lhs_abi.src,
+                    lhs_abi.repr_name,
+                    "int",
+                    size=max(1, int_storage_size(field_bits)),
+                    align=max(1, int_storage_align(max(1, int_storage_size(field_bits)))),
+                    signed=lhs_abi.signed,
+                    bits=field_bits,
+                )
+                code = obj_code + [f"  mov qword [rbp-{ptr_slot}], rax"]
+                rhs_code, rhs_abi = _x86_expr(st.expr, ctx, expected=lhs_abi)
+                rhs_code, _ = _coerce_value(rhs_code, rhs_abi, lhs_abi, st)
+                code += rhs_code
+                if st.op == "=":
+                    code += _normalize_int_result(int_abi)
+                    return code + [f"  mov r11, qword [rbp-{ptr_slot}]"] + _store_packed_int_field("r11", field_off, field_bit_off, field_bits)
+                code += ["  mov r10, rax", f"  mov r11, qword [rbp-{ptr_slot}]"] + _load_packed_int_field("r11", field_off, field_bit_off, field_bits, int_abi) + ["  mov rbx, rax", "  mov rcx, r10"]
+                if st.op == "+=":
+                    code += ["  mov rax, rbx", "  add rax, rcx"]
+                elif st.op == "-=":
+                    code += ["  mov rax, rbx", "  sub rax, rcx"]
+                elif st.op == "*=":
+                    code += ["  mov rax, rbx", "  imul rax, rcx"]
+                elif st.op == "/=":
+                    if int_abi.signed:
+                        code += ["  mov rax, rbx", "  cqo", "  idiv rcx"]
+                    else:
+                        code += ["  mov rax, rbx", "  xor rdx, rdx", "  div rcx"]
+                elif st.op == "%=":
+                    if int_abi.signed:
+                        code += ["  mov rax, rbx", "  cqo", "  idiv rcx", "  mov rax, rdx"]
+                    else:
+                        code += ["  mov rax, rbx", "  xor rdx, rdx", "  div rcx", "  mov rax, rdx"]
+                elif st.op == "&=":
+                    code += ["  mov rax, rbx", "  and rax, rcx"]
+                elif st.op == "|=":
+                    code += ["  mov rax, rbx", "  or rax, rcx"]
+                elif st.op == "^=":
+                    code += ["  mov rax, rbx", "  xor rax, rcx"]
+                elif st.op == "<<=":
+                    code += ["  mov rax, rbx", "  shl rax, cl"]
+                elif st.op == ">>=":
+                    code += ["  mov rax, rbx", f"  {'sar' if int_abi.signed else 'shr'} rax, cl"]
+                else:
+                    raise CodegenError(_diag(st, f"unsupported assignment op {st.op} on packed field"))
+                code += _normalize_int_result(int_abi)
+                return code + [f"  mov r11, qword [rbp-{ptr_slot}]"] + _store_packed_int_field("r11", field_off, field_bit_off, field_bits)
             code = obj_code + [f"  lea r11, [rax+{field_off}]", f"  mov qword [rbp-{ptr_slot}], r11"]
             rhs_code, rhs_abi = _x86_expr(st.expr, ctx, expected=lhs_abi)
             rhs_code, _ = _coerce_value(rhs_code, rhs_abi, lhs_abi, st)
@@ -1931,6 +2094,54 @@ def _x86_expr(e: Any, ctx: _FnCtx, expected: _AbiType | None = None) -> tuple[li
         abi = _AbiType("Int", "i64", "int")
         code = [f"  mov rax, {val}"]
         return _coerce_value(code, abi, expected, e) if expected is not None else (code, abi)
+    if isinstance(e, BitSizeOfTypeExpr):
+        try:
+            val = layout_of_type(e.type_name, ctx.structs, mode="query").bits
+        except LayoutError as err:
+            raise CodegenError(_diag(e, str(err))) from err
+        abi = _AbiType("Int", "i64", "int")
+        code = [f"  mov rax, {val}"]
+        return _coerce_value(code, abi, expected, e) if expected is not None else (code, abi)
+    if isinstance(e, MaxValTypeExpr):
+        ty = _canonical_type(e.type_name)
+        info = parse_int_type_name(ty)
+        if info is None:
+            raise CodegenError(_diag(e, f"maxVal expects integer type, got {ty}"))
+        bits, signed = info
+        if bits <= 64:
+            if signed:
+                val = (1 << (bits - 1)) - 1
+            else:
+                val = (1 << bits) - 1
+            abi = _lower_abi_type(ty, e, allow_memory=False)
+            code = [f"  mov rax, {_u64_imm(val)}"] + _normalize_numeric_result(abi)
+            return _coerce_value(code, abi, expected, e) if expected is not None else (code, abi)
+        val = (1 << (bits - 1)) - 1 if signed else (1 << bits) - 1
+        lo = val & ((1 << 64) - 1)
+        hi = (val >> 64) & ((1 << 64) - 1)
+        abi = _lower_abi_type(ty, e, allow_memory=False)
+        code = [f"  mov rax, {_u64_imm(lo)}", f"  mov rdx, {_u64_imm(hi)}"] + _normalize_numeric_result(abi)
+        return _coerce_value(code, abi, expected, e) if expected is not None else (code, abi)
+    if isinstance(e, MinValTypeExpr):
+        ty = _canonical_type(e.type_name)
+        info = parse_int_type_name(ty)
+        if info is None:
+            raise CodegenError(_diag(e, f"minVal expects integer type, got {ty}"))
+        bits, signed = info
+        if bits <= 64:
+            val = (-(1 << (bits - 1))) if signed else 0
+            abi = _lower_abi_type(ty, e, allow_memory=False)
+            code = [f"  mov rax, {_u64_imm(val)}"] + _normalize_numeric_result(abi)
+            return _coerce_value(code, abi, expected, e) if expected is not None else (code, abi)
+        if signed:
+            val = -(1 << (bits - 1))
+        else:
+            val = 0
+        lo = val & ((1 << 64) - 1)
+        hi = (val >> 64) & ((1 << 64) - 1)
+        abi = _lower_abi_type(ty, e, allow_memory=False)
+        code = [f"  mov rax, {_u64_imm(lo)}", f"  mov rdx, {_u64_imm(hi)}"] + _normalize_numeric_result(abi)
+        return _coerce_value(code, abi, expected, e) if expected is not None else (code, abi)
     if isinstance(e, (SizeOfValueExpr, AlignOfValueExpr)):
         ty = getattr(e, "query_type", None) or _expr_type(e.expr, ctx)
         try:
@@ -2274,10 +2485,26 @@ def _x86_expr(e: Any, ctx: _FnCtx, expected: _AbiType | None = None) -> tuple[li
         return _x86_call_expr(e, ctx, expected)
     if isinstance(e, FieldExpr):
         obj_ty = _canonical_type(_strip_ref_type(_expr_type(e.obj, ctx)))
-        field_off, field_ty = _struct_field_info(obj_ty, e.field, ctx, e)
+        field_off, field_bit_off, field_bits, field_ty, field_packed = _struct_field_info(obj_ty, e.field, ctx, e)
         field_abi = _lower_abi_type(field_ty, e, allow_memory=False)
         obj_code, obj_abi = _x86_expr(e.obj, ctx, expected=_AbiType("usize", "ptr", "int"))
         obj_code, _ = _coerce_value(obj_code, obj_abi, _AbiType("usize", "ptr", "int"), e.obj)
+        if field_packed:
+            if field_abi.cls != "int":
+                raise CodegenError(_diag(e, f"packed field access requires integer/bool type, got {field_ty}"))
+            if field_bits > 64:
+                raise CodegenError(_diag(e, f"packed field width {field_bits} exceeds current backend limit of 64 bits"))
+            int_abi = _AbiType(
+                field_abi.src,
+                field_abi.repr_name,
+                "int",
+                size=max(1, int_storage_size(field_bits)),
+                align=max(1, int_storage_align(max(1, int_storage_size(field_bits)))),
+                signed=field_abi.signed,
+                bits=field_bits,
+            )
+            code = obj_code + _load_packed_int_field("rax", field_off, field_bit_off, field_bits, int_abi)
+            return _coerce_value(code, int_abi, expected, e) if expected is not None else (code, int_abi)
         code = obj_code + [f"  lea r11, [rax+{field_off}]"] + _load_ptr_value("r11", field_abi)
         return _coerce_value(code, field_abi, expected, e) if expected is not None else (code, field_abi)
     if isinstance(e, IndexExpr):
@@ -2556,12 +2783,30 @@ def _x86_call_expr(e: Call, ctx: _FnCtx, expected: _AbiType | None = None) -> tu
         for (fname, fty), arg in zip(decl.fields, e.args):
             try:
                 field_off = struct_lay.field_offsets[fname]
+                field_bit = struct_lay.field_bit_offsets.get(fname, field_off * 8)
+                field_bits = struct_lay.field_bits.get(fname, struct_lay.field_layouts[fname].bits)
             except KeyError:
                 raise CodegenError(_diag(e, f"internal missing layout for field {fname} in {decl.name}"))
             f_abi = _lower_abi_type(fty, arg, allow_memory=False)
             arg_code, out_abi = _x86_expr(arg, ctx, expected=f_abi)
             arg_code, _ = _coerce_value(arg_code, out_abi, f_abi, arg)
-            code += arg_code + [f"  mov r11, qword [rbp-{ptr_slot}]", f"  lea r11, [r11+{field_off}]"] + _store_ptr_value("r11", f_abi)
+            if struct_lay.packed:
+                if f_abi.cls != "int":
+                    raise CodegenError(_diag(e, f"packed struct field {fname} requires integer/bool type"))
+                if field_bits > 64:
+                    raise CodegenError(_diag(e, f"packed field {fname} width {field_bits} exceeds current backend limit of 64 bits"))
+                int_abi = _AbiType(
+                    f_abi.src,
+                    f_abi.repr_name,
+                    "int",
+                    size=max(1, int_storage_size(field_bits)),
+                    align=max(1, int_storage_align(max(1, int_storage_size(field_bits)))),
+                    signed=f_abi.signed,
+                    bits=field_bits,
+                )
+                code += arg_code + _normalize_int_result(int_abi) + [f"  mov r11, qword [rbp-{ptr_slot}]"] + _store_packed_int_field("r11", field_off, field_bit % 8, field_bits)
+            else:
+                code += arg_code + [f"  mov r11, qword [rbp-{ptr_slot}]", f"  lea r11, [r11+{field_off}]"] + _store_ptr_value("r11", f_abi)
         code += [f"  mov rax, qword [rbp-{ptr_slot}]"]
         out_abi = _AbiType(decl.name, "ptr", "int")
         return _coerce_value(code, out_abi, expected, e) if expected is not None else (code, out_abi)
@@ -2732,6 +2977,97 @@ def _x86_call_expr(e: Call, ctx: _FnCtx, expected: _AbiType | None = None) -> tu
             code = arg_code + ["  mov rdi, rax", "  mov rax, 60", "  syscall", "  ud2"]
             out_abi = _AbiType("Never", "never", "void", size=0)
             return _coerce_value(code, out_abi, expected, e) if expected is not None else (code, out_abi)
+        if name in {"countOnes", "__countOnes", "leadingZeros", "__leadingZeros", "trailingZeros", "__trailingZeros"}:
+            if len(e.args) != 1:
+                raise CodegenError(_diag(e, f"{name} expects 1 argument on x86_64 backend"))
+            arg_ty = _expr_type(e.args[0], ctx)
+            arg_abi = _lower_abi_type(arg_ty, e.args[0], allow_memory=False)
+            if arg_abi.cls not in {"int", "int128"}:
+                raise CodegenError(_diag(e, f"{name} expects integer argument, got {arg_ty}"))
+            arg_code, out_abi = _x86_expr(e.args[0], ctx, expected=arg_abi)
+            arg_code, _ = _coerce_value(arg_code, out_abi, arg_abi, e.args[0])
+            bits = max(1, min(128 if arg_abi.cls == "int128" else 64, arg_abi.bits))
+            op_name = name[2:] if name.startswith("__") else name
+            code = arg_code
+            if op_name == "countOnes":
+                if arg_abi.cls == "int":
+                    code += _normalize_int_result(arg_abi) + ["  popcnt rax, rax"]
+                else:
+                    code += _normalize_int128_result(arg_abi) + ["  popcnt r10, rax", "  popcnt r11, rdx", "  add r10, r11", "  mov rax, r10"]
+            elif op_name == "leadingZeros":
+                if arg_abi.cls == "int":
+                    zero = _label(ctx, "lz_zero")
+                    done = _label(ctx, "lz_done")
+                    code += _normalize_int_result(arg_abi) + [
+                        "  test rax, rax",
+                        f"  je {zero}",
+                        "  bsr rcx, rax",
+                        f"  mov rax, {bits - 1}",
+                        "  sub rax, rcx",
+                        f"  jmp {done}",
+                        f"{zero}:",
+                        f"  mov rax, {bits}",
+                        f"{done}:",
+                    ]
+                else:
+                    high_bits = max(1, bits - 64)
+                    use_low = _label(ctx, "lz_use_low")
+                    zero = _label(ctx, "lz_zero")
+                    done = _label(ctx, "lz_done")
+                    code += _normalize_int128_result(arg_abi) + [
+                        "  test rdx, rdx",
+                        f"  je {use_low}",
+                        "  bsr rcx, rdx",
+                        f"  mov rax, {high_bits - 1}",
+                        "  sub rax, rcx",
+                        f"  jmp {done}",
+                        f"{use_low}:",
+                        "  test rax, rax",
+                        f"  je {zero}",
+                        "  bsr rcx, rax",
+                        f"  mov rax, {bits - 1}",
+                        f"  sub rax, {64}",
+                        "  sub rax, rcx",
+                        f"  jmp {done}",
+                        f"{zero}:",
+                        f"  mov rax, {bits}",
+                        f"{done}:",
+                    ]
+            else:
+                if arg_abi.cls == "int":
+                    zero = _label(ctx, "tz_zero")
+                    done = _label(ctx, "tz_done")
+                    code += _normalize_int_result(arg_abi) + [
+                        "  test rax, rax",
+                        f"  je {zero}",
+                        "  bsf rax, rax",
+                        f"  jmp {done}",
+                        f"{zero}:",
+                        f"  mov rax, {bits}",
+                        f"{done}:",
+                    ]
+                else:
+                    use_high = _label(ctx, "tz_use_high")
+                    zero = _label(ctx, "tz_zero")
+                    done = _label(ctx, "tz_done")
+                    code += _normalize_int128_result(arg_abi) + [
+                        "  test rax, rax",
+                        f"  je {use_high}",
+                        "  bsf rax, rax",
+                        f"  jmp {done}",
+                        f"{use_high}:",
+                        "  test rdx, rdx",
+                        f"  je {zero}",
+                        "  bsf rcx, rdx",
+                        "  mov rax, rcx",
+                        "  add rax, 64",
+                        f"  jmp {done}",
+                        f"{zero}:",
+                        f"  mov rax, {bits}",
+                        f"{done}:",
+                    ]
+            out_int = _AbiType("Int", "i64", "int", size=8, align=8, signed=True, bits=64)
+            return _coerce_value(code, out_int, expected, e) if expected is not None else (code, out_int)
         code: list[str] = []
         for arg in e.args:
             arg_code, _ = _x86_expr(arg, ctx)

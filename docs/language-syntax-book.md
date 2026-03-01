@@ -42,6 +42,7 @@ fn main() -> Int { return 0; }
 Notes:
 - Canonical typed form is `name: Type`.
 - Params/fields still accept legacy `name Type`.
+- `@packed` is currently supported only on `struct` declarations.
 
 ## 2. Functions and types
 
@@ -56,7 +57,7 @@ fn text_len(s: &str) -> Int { return len(s); }
 
 Type forms:
 - Primitive scalars/control: `Int`, `Float`, `Bool`, `Any`, `Void`, `Never`
-- Fixed-width ints: `i8`, `u8`, `i16`, `u16`, `i32`, `u32`, `i64`, `u64`, `i128`, `u128`, `isize`, `usize`
+- Integer families: `iN`/`uN` where `N` is `1..128`, plus `isize`/`usize` aliases
 - Function types: `fn(T1, T2) -> R`
 - Generic types: `Option<User>`, `Result<Int, String>`, `Vec<u8>`
 - Borrow types: `&T`, `&mut T`
@@ -66,6 +67,8 @@ Type forms:
 - Core stdlib owned types: `String`, `Vec<T>` (`Bytes = Vec<u8>`)
 - Builtin unsized text type: `str` (legal as `&str` or behind pointers/DST positions)
 - Sugar: `T?` desugars to `Option<T>`
+- Integer literal suffixes are supported (for example `15u4`, `3i7`)
+- Signed `i1` is rejected with a diagnostic hint recommending `u1`
 
 ## 3. Statements
 
@@ -131,6 +134,7 @@ let first = bs[0];
 
 Supported operators:
 - Arithmetic: `+`, `-`, `*`, `/`, `%`
+- Bitwise/shift: `&`, `|`, `^`, `<<`, `>>`
 - Comparison: `==`, `!=`, `<`, `<=`, `>`, `>=`
 - Logical: `&&`, `||`
 - Null-coalescing: `??`
@@ -141,6 +145,11 @@ Option rules:
 - `??` requires left operand `Option<T>` and right operand `T`.
 - `??` is short-circuiting; rhs is evaluated only when lhs is `none`.
 - Use `Option<T>` for presence/absence; use `Result<T, E>` for recoverable failures with error detail.
+
+Integer utility rules:
+- Type queries: `bitSizeOf(T)`, `maxVal(T)`, `minVal(T)`.
+- Width-aware bit intrinsics: `countOnes(x)`, `leadingZeros(x)`, `trailingZeros(x)`.
+- Implicit conversion across integer widths/signedness is rejected; use `as` explicitly.
 
 Borrow checker rules:
 - `&expr` creates a shared borrow.
@@ -171,7 +180,7 @@ Text/buffer rules:
 
 Move/copy rules:
 - Default for assignment, argument passing, and return is move semantics.
-- Copy-by-default set is currently: scalar numerics (`Int` and fixed-width ints), `Float`, `Bool`, and shared references (`&T`).
+- Copy-by-default set is currently: scalar numerics (`Int` and `iN`/`uN` ints), `Float`, `Bool`, and shared references (`&T`).
 - Other values are move-only unless explicitly designated copyable by future trait/type rules.
 
 Never rule:
@@ -202,7 +211,7 @@ Current x86-64 backend contract (System V ABI oriented):
 
 - Scalar lowering:
   - `Bool` -> logical `i1`, materialized as `0/1` in integer registers (`al`/`rax` path).
-  - `Int`, fixed-width ints, `isize`, `usize` -> integer register class.
+  - `Int`, `iN`/`uN`, `isize`, `usize` -> integer register class.
   - `&T`, `&mut T`, and `fn(...) -> ...` values -> pointer-sized integers (`u64` on x86-64).
   - `Float`/`f32`/`f64` -> SSE class (`xmm*` registers).
 - Calls/returns:
@@ -226,6 +235,7 @@ Current x86-64 backend contract (System V ABI oriented):
   - `async` declarations and `await` expressions lower to direct native control flow.
   - Aggregate and dynamic values lower as opaque pointer-sized handles at the ABI boundary.
   - `match`, struct field access/assignment, and array/slice indexing/get are lowered directly.
+  - `@packed struct` field accesses/updates lower through shift/mask read-modify-write paths (current packed-field backend support: up to 64-bit fields).
 
 ## 7. EBNF snapshot
 
@@ -246,14 +256,24 @@ stmt         = let_stmt | fixed_stmt | comptime_stmt | defer_stmt | drop_stmt | 
 let_stmt     = "let" ["mut"] ident [":" type] "=" expr ";" ;
 fixed_stmt   = "fixed" ident [":" type] "=" expr ";" ;
 drop_stmt    = "drop" expr ";" ;
-assign_stmt  = expr ("=" | "+=" | "-=" | "*=" | "/=" | "%=") expr ";" ;
+assign_stmt  = expr ("=" | "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" | "<<=" | ">>=") expr ";" ;
 expr         = coalesce_expr ;
-coalesce_expr = logic_or_expr ["??" coalesce_expr] ;
+coalesce_expr = logic_or_expr { "??" logic_or_expr } ;
 logic_or_expr = logic_and_expr { "||" logic_and_expr } ;
-logic_and_expr = compare_expr { "&&" compare_expr } ;
-compare_expr = add_expr { ("==" | "!=" | "<" | "<=" | ">" | ">=") add_expr } ;
+logic_and_expr = bit_or_expr { "&&" bit_or_expr } ;
+bit_or_expr  = bit_xor_expr { "|" bit_xor_expr } ;
+bit_xor_expr = bit_and_expr { "^" bit_and_expr } ;
+bit_and_expr = compare_expr { "&" compare_expr } ;
+compare_expr = shift_expr { ("==" | "!=" | "<" | "<=" | ">" | ">=") shift_expr } ;
+shift_expr   = add_expr { ("<<" | ">>") add_expr } ;
 add_expr     = mul_expr { ("+" | "-") mul_expr } ;
 mul_expr     = unary_expr { ("*" | "/" | "%") unary_expr } ;
-unary_expr   = ["await"] ( ("-" | "!" | "*" | "&" ["mut"]) unary_expr | postfix_expr ) ;
+unary_expr   = ["await"] ( ("-" | "!" | "~" | "*" | "&" ["mut"]) unary_expr | cast_expr ) ;
+cast_expr    = postfix_expr { "as" type } ;
 postfix_expr = atom { "." ident | "[" expr "]" | "(" [expr {"," expr}] ")" } ;
+atom         = int | float | string | typed_int | "none" | ident | "(" expr ")" | layout_query | type_query ;
+typed_int    = int int_type_tok ;
+int_type_tok = ("i" | "u") nonzero_digit {digit} ;
+layout_query = "sizeof" "(" type ")" | "alignof" "(" type ")" | "size_of" "(" expr ")" | "align_of" "(" expr ")" ;
+type_query   = "bitSizeOf" "(" type ")" | "maxVal" "(" type ")" | "minVal" "(" type ")" ;
 ```

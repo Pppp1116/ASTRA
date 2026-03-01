@@ -1,4 +1,5 @@
 from astra.ast import (
+    BitSizeOfTypeExpr,
     AlignOfTypeExpr,
     AlignOfValueExpr,
     AssignStmt,
@@ -17,6 +18,8 @@ from astra.ast import (
     ImportDecl,
     IndexExpr,
     LetStmt,
+    MaxValTypeExpr,
+    MinValTypeExpr,
     SizeOfTypeExpr,
     SizeOfValueExpr,
     StructDecl,
@@ -231,3 +234,28 @@ def test_parse_integer_literal_type_suffix():
     assert isinstance(fn.body[0], LetStmt)
     assert isinstance(fn.body[0].expr, CastExpr)
     assert fn.body[0].expr.type_name == "u4"
+
+
+def test_parse_packed_struct_attribute():
+    src = "@packed struct Header { version: u4, flags: u3, enabled: u1 }"
+    prog = parse(src)
+    st = prog.items[0]
+    assert isinstance(st, StructDecl)
+    assert st.packed
+    assert st.fields == [("version", "u4"), ("flags", "u3"), ("enabled", "u1")]
+
+
+def test_parse_bit_intrinsics_with_type_arguments():
+    src = """
+fn main() -> Int {
+  let a = bitSizeOf(u3);
+  let b = maxVal(u4);
+  let c = minVal(i4);
+  return a + (b as Int) + (c as Int);
+}
+"""
+    prog = parse(src)
+    fn = prog.items[0]
+    assert isinstance(fn.body[0].expr, BitSizeOfTypeExpr)
+    assert isinstance(fn.body[1].expr, MaxValTypeExpr)
+    assert isinstance(fn.body[2].expr, MinValTypeExpr)

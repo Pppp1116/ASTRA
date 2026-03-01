@@ -2,6 +2,21 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
+@dataclass(frozen=True)
+class ArbitraryIntType:
+    signed: bool
+    width: int
+
+    def __str__(self) -> str:
+        return f"{'i' if self.signed else 'u'}{self.width}"
+
+
+def type_text(typ: Any) -> str:
+    if isinstance(typ, ArbitraryIntType):
+        return str(typ)
+    return str(typ)
+
+
 @dataclass
 class Program:
     items: list[Any] = field(default_factory=list)
@@ -117,6 +132,7 @@ class StructDecl:
     fields: list[tuple[str, str]]
     methods: list[Any]
     pub: bool = False
+    packed: bool = False
     doc: str = ""
     pos: int = 0
     line: int = 0
@@ -345,6 +361,30 @@ class SizeOfValueExpr:
 @dataclass
 class AlignOfValueExpr:
     expr: Any
+    pos: int = 0
+    line: int = 0
+    col: int = 0
+
+
+@dataclass
+class BitSizeOfTypeExpr:
+    type_name: Any
+    pos: int = 0
+    line: int = 0
+    col: int = 0
+
+
+@dataclass
+class MaxValTypeExpr:
+    type_name: Any
+    pos: int = 0
+    line: int = 0
+    col: int = 0
+
+
+@dataclass
+class MinValTypeExpr:
+    type_name: Any
     pos: int = 0
     line: int = 0
     col: int = 0

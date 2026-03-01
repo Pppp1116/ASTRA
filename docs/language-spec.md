@@ -30,7 +30,7 @@ while_stmt = "while" expr block ;
 for_stmt  = "for" (ident "in" expr | [let_stmt | fixed_stmt | expr ";"] [expr] ";" [assign_stmt | expr]) block ;
 assign_stmt = expr ("=" | "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" | "<<=" | ">>=") expr ";" ;
 expr      = coalesce_expr ;
-coalesce_expr = logic_or_expr ["??" coalesce_expr] ;
+coalesce_expr = logic_or_expr { "??" logic_or_expr } ;
 logic_or_expr = logic_and_expr { "||" logic_and_expr } ;
 logic_and_expr = bit_or_expr { "&&" bit_or_expr } ;
 bit_or_expr = bit_xor_expr { "|" bit_xor_expr } ;
@@ -43,13 +43,17 @@ mul_expr  = unary_expr { ("*" | "/" | "%") unary_expr } ;
 unary_expr = ["await"] ( ("-" | "!" | "~" | "*" | "&" ["mut"]) unary_expr | cast_expr ) ;
 cast_expr = postfix_expr { "as" type } ;
 postfix_expr = atom { "." ident | "[" expr "]" | "(" [expr {"," expr}] ")" } ;
-atom      = int | float | string | "none" | ident | "(" expr ")" | layout_query ;
+atom      = int | float | string | typed_int | "none" | ident | "(" expr ")" | layout_query | type_query ;
+typed_int = int int_type_tok ;
+int_type_tok = ("i" | "u") nonzero_digit {digit} ;
 layout_query = "sizeof" "(" type ")" | "alignof" "(" type ")" | "size_of" "(" expr ")" | "align_of" "(" expr ")" ;
+type_query = "bitSizeOf" "(" type ")" | "maxVal" "(" type ")" | "minVal" "(" type ")" ;
 ```
 
 Conventions:
 - Canonical style uses colon-typed declarations (`name: Type`) for params, fields, and local bindings.
 - The parser still accepts legacy field/param style (`name Type`) for backward compatibility.
+- `@packed` is currently a recognized top-level attribute and is only valid on `struct` declarations.
 
 ## Semantics
 - Call-by-value.
@@ -57,6 +61,7 @@ Conventions:
 - Strict evaluation order left-to-right.
 - Integer arithmetic/bitwise/shift operators require matching integer types.
 - Mixed int/float arithmetic and comparison are rejected unless explicit cast (`expr as Type`) is used.
+- Implicit conversion between different integer widths/signedness is rejected; explicit cast is required.
 - Right shift semantics are type-directed:
   - signed integers: arithmetic shift
   - unsigned integers: logical shift
@@ -80,7 +85,10 @@ Conventions:
 
 ## Type system
 - Nominal primitive types: `Int`, `Float`, `Bool`, `Any`, `Void`, `Never`.
-- Fixed-width integer aliases: `i8`, `u8`, `i16`, `u16`, `i32`, `u32`, `i64`, `u64`, `i128`, `u128`, `isize`, `usize`.
+- Integer families: `iN`/`uN` where `N` is in `1..128`, plus `isize`/`usize` aliases.
+- Integer literals may carry width suffixes (for example `15u4`, `3i7`).
+- Signed `i1` is rejected in semantic analysis with a hint suggesting `u1`.
+- Invalid widths like `i0` or `u65536` are lexer errors.
 - Built-in generic sums: `Option<T>` and `Result<T, E>`.
 - Stdlib core owned types: `String`, `Vec<T>`.
 - Built-in bytes alias: `Bytes = Vec<u8>`.
@@ -90,6 +98,11 @@ Conventions:
 - `none` has no standalone type; it is valid only where `Option<T>` is expected.
 - `a ?? b` requires `a: Option<T>` and `b: T`, producing `T`.
 - `??` is short-circuiting: the right operand is evaluated only when the left operand is `none`.
+- Integer type queries:
+  - `bitSizeOf(T)` returns logical bit width.
+  - `maxVal(T)`/`minVal(T)` return integer bounds for integer type `T`.
+- Width-aware integer bit intrinsics:
+  - `countOnes(x)`, `leadingZeros(x)`, `trailingZeros(x)`.
 - `Option<T>` models absence/presence; `Result<T, E>` models recoverable failures with error information.
 - `Never` is coercible to any type `T` (including `Void`).
 - In type joins, `Never` acts as bottom: `join(Never, T) = T` and `join(Never, Never) = Never`.
@@ -151,3 +164,4 @@ Conventions:
 - `free(ptr)` releases a previously allocated handle.
 - `spawn(fn, ...)` starts `fn` on a runtime thread and returns an integer task id.
 - `join(task_id)` blocks until the task completes and returns its result.
+- `countOnes(x)`, `leadingZeros(x)`, `trailingZeros(x)` require integer arguments.

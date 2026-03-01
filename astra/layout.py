@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping
 
-from astra.ast import StructDecl
+from astra.ast import StructDecl, type_text
 from astra.int_types import int_storage_align, int_storage_size, parse_int_type_name
 
 
@@ -27,7 +27,11 @@ class StructLayout:
     size: int
     align: int
     field_offsets: dict[str, int]
+    field_bit_offsets: dict[str, int]
+    field_bits: dict[str, int]
     field_layouts: dict[str, TypeLayout]
+    bits: int
+    packed: bool = False
 
 
 _SCALAR_LAYOUTS: dict[str, TypeLayout] = {
@@ -48,7 +52,7 @@ def align_to(value: int, align: int) -> int:
 
 
 def canonical_type(typ: str) -> str:
-    t = typ.strip()
+    t = type_text(typ).strip()
     if t == "Bytes":
         return "Vec<u8>"
     if t.startswith("&mut "):
@@ -116,7 +120,7 @@ def layout_of_type(
         return TypeLayout(8, 8, "ptr", False, 64, False, opaque=True)
     if c in structs:
         s_layout = layout_of_struct(c, structs, mode=mode, _cache=_cache, _stack=_stack)
-        return TypeLayout(s_layout.size, s_layout.align, "struct", None, s_layout.size * 8, True)
+        return TypeLayout(s_layout.size, s_layout.align, "struct", None, s_layout.bits, True)
     if mode == "query":
         raise LayoutError(f"unknown type {c} for layout query")
     return TypeLayout(8, 8, "ptr", False, 64, False, opaque=True)
@@ -139,20 +143,59 @@ def layout_of_struct(
     if decl is None:
         raise LayoutError(f"unknown struct type {name}")
     stack.add(name)
-    offset = 0
-    struct_align = 1
-    field_offsets: dict[str, int] = {}
-    field_layouts: dict[str, TypeLayout] = {}
-    for field_name, field_ty in decl.fields:
-        lay = layout_of_type(field_ty, structs, mode=mode, _cache=cache, _stack=stack)
-        offset = align_to(offset, lay.align)
-        field_offsets[field_name] = offset
-        field_layouts[field_name] = lay
-        offset += lay.size
-        if lay.align > struct_align:
-            struct_align = lay.align
-    size = align_to(offset, struct_align)
-    out = StructLayout(size=size, align=struct_align, field_offsets=field_offsets, field_layouts=field_layouts)
+    if decl.packed:
+        bit_offset = 0
+        field_offsets: dict[str, int] = {}
+        field_bit_offsets: dict[str, int] = {}
+        field_bits: dict[str, int] = {}
+        field_layouts: dict[str, TypeLayout] = {}
+        for field_name, field_ty in decl.fields:
+            lay = layout_of_type(field_ty, structs, mode=mode, _cache=cache, _stack=stack)
+            bits = 1 if canonical_type(field_ty) == "Bool" else lay.bits
+            field_offsets[field_name] = bit_offset // 8
+            field_bit_offsets[field_name] = bit_offset
+            field_bits[field_name] = bits
+            field_layouts[field_name] = lay
+            bit_offset += bits
+        size = max(1, (bit_offset + 7) // 8) if decl.fields else 0
+        out = StructLayout(
+            size=size,
+            align=1,
+            field_offsets=field_offsets,
+            field_bit_offsets=field_bit_offsets,
+            field_bits=field_bits,
+            field_layouts=field_layouts,
+            bits=bit_offset,
+            packed=True,
+        )
+    else:
+        offset = 0
+        struct_align = 1
+        field_offsets = {}
+        field_bit_offsets = {}
+        field_bits = {}
+        field_layouts = {}
+        for field_name, field_ty in decl.fields:
+            lay = layout_of_type(field_ty, structs, mode=mode, _cache=cache, _stack=stack)
+            offset = align_to(offset, lay.align)
+            field_offsets[field_name] = offset
+            field_bit_offsets[field_name] = offset * 8
+            field_bits[field_name] = lay.bits
+            field_layouts[field_name] = lay
+            offset += lay.size
+            if lay.align > struct_align:
+                struct_align = lay.align
+        size = align_to(offset, struct_align)
+        out = StructLayout(
+            size=size,
+            align=struct_align,
+            field_offsets=field_offsets,
+            field_bit_offsets=field_bit_offsets,
+            field_bits=field_bits,
+            field_layouts=field_layouts,
+            bits=size * 8,
+            packed=False,
+        )
     cache[name] = out
     stack.remove(name)
     return out

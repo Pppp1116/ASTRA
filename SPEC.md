@@ -14,6 +14,7 @@ block_comment   = "/*" { any_char } "*/" ;
 
 ident           = ( "_" | letter ) { "_" | letter | digit } ;
 int_lit         = digit { digit } ;
+int_type_tok    = ("i" | "u") nonzero_digit { digit } ;
 float_lit       = digit { digit } "." digit { digit } ;
 str_lit         = "\"" { char | escape } "\"" ;
 str_multi_lit   = "\"\"\"" { any_char } "\"\"\"" ;
@@ -40,12 +41,14 @@ Notes:
 - Unterminated block comments/strings/chars are lexer errors (`LEX file:line:col: ...`).
 - `doc_comment` tokens are consumed by parser in declaration/block positions.
 - `str_multi_lit` is tokenized but not currently accepted by expression parsing.
+- `int_type_tok` is recognized as an integer-type token and validated to width range `1..128` (`i0`, `u0`, and widths above `128` are lexer errors).
+- `@packed` is recognized as an attribute introducer and is only valid on `struct` declarations.
 
 ## 2. Expression Grammar
 
 ```ebnf
 expr            = coalesce_expr ;
-coalesce_expr   = logic_or_expr [ "??" coalesce_expr ] ;
+coalesce_expr   = logic_or_expr { "??" logic_or_expr } ;
 logic_or_expr   = logic_and_expr { "||" logic_and_expr } ;
 logic_and_expr  = bit_or_expr { "&&" bit_or_expr } ;
 bit_or_expr     = bit_xor_expr { "|" bit_xor_expr } ;
@@ -59,10 +62,12 @@ unary_expr      = [ "await" ] ( ( "-" | "!" | "~" | "*" | "&" [ "mut" ] ) unary_
 cast_expr       = postfix_expr { "as" type } ;
 postfix_expr    = atom { "." ident | "[" expr "]" | "(" [expr {"," expr}] ")" } ;
 atom            = int_lit | float_lit | str_lit | char_lit | bool_lit
-                | "none" | ident | array_lit | "(" expr ")" | layout_query ;
+                | typed_int_lit | "none" | ident | array_lit | "(" expr ")" | layout_query | type_intrinsic_query ;
+typed_int_lit   = int_lit int_type_tok ;
 array_lit       = "[" [expr {"," expr}] "]" ;
 layout_query    = "sizeof" "(" type ")" | "alignof" "(" type ")"
                 | "size_of" "(" expr ")" | "align_of" "(" expr ")" ;
+type_intrinsic_query = "bitSizeOf" "(" type ")" | "maxVal" "(" type ")" | "minVal" "(" type ")" ;
 ```
 
 Precedence (high to low):
@@ -122,11 +127,12 @@ Constraints:
 ## 4. Type System Rules
 
 Core:
-- Primitive roots include `Int`, fixed-width ints (`i8...u128`, `isize`, `usize`), `Float` (`f32`, `f64`), `Bool`, `Any`, `Void`, `Never`.
+- Primitive roots include `Int`, dynamic-width ints (`iN`/`uN`, `N=1..128`) plus aliases (`isize`, `usize`), `Float` (`f32`, `f64`), `Bool`, `Any`, `Void`, `Never`.
 - `T?` desugars to `Option<T>`.
 - `none` is only valid in `Option<T>` context.
 - `a ?? b` requires `a: Option<T>`, `b: T`, result `T`.
 - `Never` is bottom-like and can coerce to any expected type.
+- `i1` is rejected in semantic analysis with a hint (`i1 can only represent 0 and -1, did you mean u1?`).
 
 References:
 - Shared reference: `&T`.
@@ -174,7 +180,10 @@ Owned-state checks:
 Numeric semantics:
 - Integer arithmetic/bitwise/shift operators require matching integer types.
 - Mixed int/float arithmetic and comparison are rejected unless explicit cast (`expr as Type`) is used.
+- Implicit conversion between different integer widths/signedness is rejected; explicit cast is required (for example `u4` -> `u8`).
 - Right shift is arithmetic for signed integer types and logical for unsigned integer types.
+- Width-aware integer builtins are available: `countOnes`, `leadingZeros`, `trailingZeros`.
+- Type-level integer queries are available: `bitSizeOf(T)`, `maxVal(T)`, `minVal(T)`.
 - Overflow mode is controlled by build/check configuration:
   - `build --profile debug` => effective default `trap`
   - `build --profile release` => effective default `wrap`
@@ -198,6 +207,7 @@ Common contract:
 - `Int` lowers to 64-bit integer ABI representation.
 - Runtime ABI symbols are required for lowered builtins (`astra_*` shims).
 - `i128`/`u128` lowering uses split register returns (`rax` low, `rdx` high) and runtime helpers for hard ops (`mul/div/mod`).
+- Packed struct fields are lowered through bit extraction/update sequences; current packed backend support is limited to packed fields up to 64 bits.
 - Backend has explicit unsupported-case errors for some constructs/types; these are `CODEGEN` errors.
 - `native` target additionally requires external toolchain (`nasm` and linker via `cc`/`ld`).
 

@@ -81,6 +81,20 @@ class _Evaluator:
             return layout_of_type(e.type_name, self.structs, mode="query").size
         if isinstance(e, AlignOfTypeExpr):
             return layout_of_type(e.type_name, self.structs, mode="query").align
+        if isinstance(e, BitSizeOfTypeExpr):
+            return layout_of_type(e.type_name, self.structs, mode="query").bits
+        if isinstance(e, MaxValTypeExpr):
+            ty = canonical_type(e.type_name)
+            if not is_int_type_name(ty):
+                raise ComptimeError(_diag(self.filename, e.line, e.col, f"maxVal expects integer type, got {ty}"))
+            bits, signed = _int_props(ty)
+            return _int_max(bits, signed)
+        if isinstance(e, MinValTypeExpr):
+            ty = canonical_type(e.type_name)
+            if not is_int_type_name(ty):
+                raise ComptimeError(_diag(self.filename, e.line, e.col, f"minVal expects integer type, got {ty}"))
+            bits, signed = _int_props(ty)
+            return _int_min(bits) if signed else 0
         if isinstance(e, SizeOfValueExpr):
             return self._layout_for_value_expr(e.expr, env, env_types).size
         if isinstance(e, AlignOfValueExpr):
@@ -130,6 +144,26 @@ class _Evaluator:
                 raise ComptimeError(_diag(self.filename, e.line, e.col, f"call to non-pure function {name}"))
             if name == "len":
                 return len(args[0])
+            if name in {"countOnes", "__countOnes", "leadingZeros", "__leadingZeros", "trailingZeros", "__trailingZeros"}:
+                if len(args) != 1:
+                    raise ComptimeError(_diag(self.filename, e.line, e.col, f"{name} expects 1 argument"))
+                ty = self._expr_type_hint(e.args[0], env, env_types) or "Int"
+                if not _is_int_type_name(ty):
+                    raise ComptimeError(_diag(self.filename, e.line, e.col, f"{name} expects integer argument, got {ty}"))
+                bits, _ = _int_props(ty)
+                v = int(args[0]) & ((1 << bits) - 1)
+                base = name[2:] if name.startswith("__") else name
+                if base == "countOnes":
+                    return v.bit_count()
+                if base == "leadingZeros":
+                    return bits if v == 0 else max(0, bits - v.bit_length())
+                if v == 0:
+                    return bits
+                c = 0
+                while (v & 1) == 0:
+                    v >>= 1
+                    c += 1
+                return c
             if name == "alloc":
                 ptr = self.next_ptr
                 self.next_ptr += 1
@@ -187,6 +221,10 @@ class _Evaluator:
                 return "Float"
             return None
         if isinstance(expr, CastExpr):
+            return canonical_type(expr.type_name)
+        if isinstance(expr, (SizeOfTypeExpr, AlignOfTypeExpr, BitSizeOfTypeExpr, SizeOfValueExpr, AlignOfValueExpr)):
+            return "Int"
+        if isinstance(expr, (MaxValTypeExpr, MinValTypeExpr)):
             return canonical_type(expr.type_name)
         if isinstance(expr, Unary):
             if expr.op == "!":

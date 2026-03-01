@@ -23,60 +23,68 @@ COPY_SCALAR_TYPES = {"Float", "f32", "f64", "Bool"}
 NONE_LIT_TYPE = "<none>"
 
 
-def _is_option_type(typ: str) -> bool:
-    return typ.startswith("Option<") and typ.endswith(">")
+def _is_option_type(typ: Any) -> bool:
+    t = type_text(typ)
+    return t.startswith("Option<") and t.endswith(">")
 
 
-def _option_inner(typ: str) -> str:
-    return typ[7:-1]
+def _option_inner(typ: Any) -> str:
+    t = type_text(typ)
+    return t[7:-1]
 
 
-def _is_vec_type(typ: str) -> bool:
-    return typ.startswith("Vec<") and typ.endswith(">")
+def _is_vec_type(typ: Any) -> bool:
+    t = type_text(typ)
+    return t.startswith("Vec<") and t.endswith(">")
 
 
-def _vec_inner(typ: str) -> str:
-    return typ[4:-1]
+def _vec_inner(typ: Any) -> str:
+    t = type_text(typ)
+    return t[4:-1]
 
 
-def _is_slice_type(typ: str) -> bool:
-    return typ.startswith("[") and typ.endswith("]")
+def _is_slice_type(typ: Any) -> bool:
+    t = type_text(typ)
+    return t.startswith("[") and t.endswith("]")
 
 
-def _slice_inner(typ: str) -> str:
-    return typ[1:-1]
+def _slice_inner(typ: Any) -> str:
+    t = type_text(typ)
+    return t[1:-1]
 
 
-def _strip_ref(typ: str) -> str:
-    if typ.startswith("&mut "):
-        return typ[5:]
-    if typ.startswith("&"):
-        return typ[1:]
-    return typ
+def _strip_ref(typ: Any) -> str:
+    t = _canonical_type(typ)
+    if t.startswith("&mut "):
+        return t[5:]
+    if t.startswith("&"):
+        return t[1:]
+    return t
 
 
-def _is_ref_type(typ: str) -> bool:
-    return typ.startswith("&")
+def _is_ref_type(typ: Any) -> bool:
+    return _canonical_type(typ).startswith("&")
 
 
-def _is_mut_ref_type(typ: str) -> bool:
-    return typ.startswith("&mut ")
+def _is_mut_ref_type(typ: Any) -> bool:
+    return _canonical_type(typ).startswith("&mut ")
 
 
-def _canonical_type(typ: str) -> str:
-    if typ == "Bytes":
+def _canonical_type(typ: Any) -> str:
+    t = type_text(typ)
+    if t == "Bytes":
         return "Vec<u8>"
-    if _is_option_type(typ):
-        return f"Option<{_canonical_type(_option_inner(typ))}>"
-    if typ.startswith("&mut "):
-        return f"&mut {_canonical_type(typ[5:])}"
-    if typ.startswith("&"):
-        return f"&{_canonical_type(typ[1:])}"
-    if _is_slice_type(typ):
-        return f"[{_canonical_type(_slice_inner(typ))}]"
-    if _is_vec_type(typ):
-        return f"Vec<{_canonical_type(_vec_inner(typ))}>"
-    return typ
+    if _is_option_type(t):
+        return f"Option<{_canonical_type(_option_inner(t))}>"
+    if t.startswith("&mut "):
+        return f"&mut {_canonical_type(t[5:])}"
+    if t.startswith("&"):
+        return f"&{_canonical_type(t[1:])}"
+    if _is_slice_type(t):
+        return f"[{_canonical_type(_slice_inner(t))}]"
+    if _is_vec_type(t):
+        return f"Vec<{_canonical_type(_vec_inner(t))}>"
+    return t
 
 
 def _int_info(typ: str) -> tuple[int, bool] | None:
@@ -111,6 +119,16 @@ def _is_copy_type(typ: str) -> bool:
     if c in COPY_SCALAR_TYPES:
         return True
     return _is_ref_type(c) and not _is_mut_ref_type(c)
+
+
+def _validate_decl_type(typ: Any, filename: str, line: int, col: int) -> None:
+    c = _canonical_type(typ)
+    info = _int_info(c)
+    if info is None:
+        return
+    bits, signed = info
+    if signed and bits == 1:
+        raise SemanticError(_diag(filename, line, col, "i1 can only represent 0 and -1, did you mean u1?"))
 
 
 @dataclass
@@ -169,6 +187,9 @@ BUILTIN_SIGS: dict[str, BuiltinSig] = {
     "monotonic_ms": BuiltinSig([], "Int"),
     "sleep_ms": BuiltinSig(["Int"], "Int"),
     "panic": BuiltinSig(["&str"], "Never"),
+    "countOnes": BuiltinSig(["Any"], "Int"),
+    "leadingZeros": BuiltinSig(["Any"], "Int"),
+    "trailingZeros": BuiltinSig(["Any"], "Int"),
 }
 
 for _name, _sig in list(BUILTIN_SIGS.items()):
@@ -442,6 +463,10 @@ def _require_type(filename: str, line: int, col: int, expected: str, actual: str
             return
         raise SemanticError(_diag(filename, line, col, f"`none` requires Option<T> context for {what}, got {expected}"))
     if not _same_type(expected, actual):
+        exp = _canonical_type(expected)
+        act = _canonical_type(actual)
+        if _is_int_type(exp) and _is_int_type(act):
+            raise SemanticError(_diag(filename, line, col, f"cannot implicitly convert {act} to {exp}, use explicit cast"))
         raise SemanticError(_diag(filename, line, col, f"type mismatch for {what}: expected {expected}, got {actual}"))
 
 
@@ -719,12 +744,28 @@ def analyze(prog: Program, filename: str = "<input>", freestanding: bool = False
             _resolve_import(item.path, filename, item.line, item.col)
             continue
         if isinstance(item, StructDecl):
+            for _, field_ty in item.fields:
+                _validate_decl_type(field_ty, filename, item.line, item.col)
+            if item.packed:
+                for field_name, field_ty in item.fields:
+                    c = _canonical_type(field_ty)
+                    if c != "Bool" and not _is_int_type(c):
+                        raise SemanticError(_diag(filename, item.line, item.col, "packed struct fields must be integer or bool types"))
+                    info = _int_info(c)
+                    if info is not None and info[0] > 64:
+                        raise SemanticError(_diag(filename, item.line, item.col, f"packed field {field_name} width {info[0]} exceeds current backend limit of 64 bits"))
             structs[item.name] = item
+            continue
+        if isinstance(item, TypeAliasDecl):
+            _validate_decl_type(item.target, filename, item.line, item.col)
             continue
         if isinstance(item, EnumDecl):
             enums[item.name] = item
             continue
         if isinstance(item, (FnDecl, ExternFnDecl)):
+            for _, pty in item.params:
+                _validate_decl_type(pty, filename, item.line, item.col)
+            _validate_decl_type(item.ret, filename, item.line, item.col)
             fn_groups.setdefault(item.name, []).append(item)
 
     for name, decls in fn_groups.items():
@@ -1271,6 +1312,32 @@ def _infer(
             raise SemanticError(_diag(filename, e.line, e.col, str(err))) from err
         setattr(e, "query_type", _canonical_type(e.type_name))
         return _typed(e, "Int")
+    if isinstance(e, BitSizeOfTypeExpr):
+        try:
+            lay = layout_of_type(e.type_name, structs, mode="query")
+        except LayoutError as err:
+            raise SemanticError(_diag(filename, e.line, e.col, str(err))) from err
+        setattr(e, "query_type", _canonical_type(e.type_name))
+        setattr(e, "query_bits", lay.bits)
+        return _typed(e, "Int")
+    if isinstance(e, MaxValTypeExpr):
+        info = _int_info(e.type_name)
+        if info is None:
+            raise SemanticError(_diag(filename, e.line, e.col, f"maxVal expects an integer type, got {_canonical_type(e.type_name)}"))
+        bits, signed = info
+        setattr(e, "query_type", _canonical_type(e.type_name))
+        setattr(e, "query_bits", bits)
+        setattr(e, "query_signed", signed)
+        return _typed(e, _canonical_type(e.type_name))
+    if isinstance(e, MinValTypeExpr):
+        info = _int_info(e.type_name)
+        if info is None:
+            raise SemanticError(_diag(filename, e.line, e.col, f"minVal expects an integer type, got {_canonical_type(e.type_name)}"))
+        bits, signed = info
+        setattr(e, "query_type", _canonical_type(e.type_name))
+        setattr(e, "query_bits", bits)
+        setattr(e, "query_signed", signed)
+        return _typed(e, _canonical_type(e.type_name))
     if isinstance(e, (SizeOfValueExpr, AlignOfValueExpr)):
         # Query forms are type-only and must not consume moves/borrows from the source expression.
         owned_copy = owned.copy() if owned is not None else None
@@ -1316,6 +1383,7 @@ def _infer(
     if isinstance(e, CastExpr):
         src = _infer(e.expr, scopes, fixed_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name)
         dst = _canonical_type(e.type_name)
+        _validate_decl_type(dst, filename, e.line, e.col)
         if not _cast_supported(src, dst):
             raise SemanticError(_diag(filename, e.line, e.col, f"unsupported cast from {src} to {e.type_name}"))
         return _typed(e, dst)
@@ -1432,6 +1500,14 @@ def _infer_call(
     _check_call_arg_borrows(e.args, fixed_scopes, borrow, filename)
     if isinstance(e.fn, Name):
         name = e.fn.value
+        builtin_base = name[2:] if name.startswith("__") else name
+        if builtin_base in {"countOnes", "leadingZeros", "trailingZeros"}:
+            if len(e.args) != 1:
+                raise SemanticError(_diag(filename, e.line, e.col, f"{name} expects 1 args, got {len(e.args)}"))
+            aty = arg_types[0]
+            if not _is_int_type(aty):
+                raise SemanticError(_diag(filename, e.args[0].line, e.args[0].col, f"{name} expects an integer argument, got {aty}"))
+            return "Int"
         if name in fn_groups:
             known_types = set(PRIMITIVES) | set(structs.keys()) | set(enums.keys())
             decl = _choose_impl(name, fn_groups[name], arg_types, known_types, filename, e.line, e.col)

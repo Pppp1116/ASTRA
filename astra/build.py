@@ -12,6 +12,7 @@ from astra.ast import (
     AlignOfValueExpr,
     AssignStmt,
     AwaitExpr,
+    BitSizeOfTypeExpr,
     Binary,
     BoolLit,
     BreakStmt,
@@ -33,6 +34,8 @@ from astra.ast import (
     LetStmt,
     Literal,
     MatchStmt,
+    MaxValTypeExpr,
+    MinValTypeExpr,
     Name,
     NilLit,
     Program,
@@ -191,6 +194,9 @@ _STRICT_EXPRS = {
     CastExpr,
     SizeOfTypeExpr,
     AlignOfTypeExpr,
+    BitSizeOfTypeExpr,
+    MaxValTypeExpr,
+    MinValTypeExpr,
     SizeOfValueExpr,
     AlignOfValueExpr,
 }
@@ -259,7 +265,7 @@ def _strict_walk_expr(e: object, errs: list[str]) -> None:
     if isinstance(e, CastExpr):
         _strict_walk_expr(e.expr, errs)
         return
-    if isinstance(e, (SizeOfTypeExpr, AlignOfTypeExpr)):
+    if isinstance(e, (SizeOfTypeExpr, AlignOfTypeExpr, BitSizeOfTypeExpr, MaxValTypeExpr, MinValTypeExpr)):
         return
     if isinstance(e, (SizeOfValueExpr, AlignOfValueExpr)):
         _strict_walk_expr(e.expr, errs)

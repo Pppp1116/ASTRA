@@ -54,7 +54,7 @@ def _fmt_expr(e) -> str:
     if isinstance(e, Unary):
         return f"{e.op}{_fmt_expr_with_prec(e.expr, _PREC_UNARY)}"
     if isinstance(e, CastExpr):
-        return f"{_fmt_expr_with_prec(e.expr, _PREC_CAST)} as {e.type_name}"
+        return f"{_fmt_expr_with_prec(e.expr, _PREC_CAST)} as {type_text(e.type_name)}"
     if isinstance(e, Binary):
         p = FMT_BIN_PREC[e.op]
         left = _fmt_expr_with_prec(e.left, p, right_child=False)
@@ -72,9 +72,15 @@ def _fmt_expr(e) -> str:
     if isinstance(e, ArrayLit):
         return f"[{', '.join(_fmt_expr(x) for x in e.elements)}]"
     if isinstance(e, SizeOfTypeExpr):
-        return f"sizeof({e.type_name})"
+        return f"sizeof({type_text(e.type_name)})"
     if isinstance(e, AlignOfTypeExpr):
-        return f"alignof({e.type_name})"
+        return f"alignof({type_text(e.type_name)})"
+    if isinstance(e, BitSizeOfTypeExpr):
+        return f"bitSizeOf({type_text(e.type_name)})"
+    if isinstance(e, MaxValTypeExpr):
+        return f"maxVal({type_text(e.type_name)})"
+    if isinstance(e, MinValTypeExpr):
+        return f"minVal({type_text(e.type_name)})"
     if isinstance(e, SizeOfValueExpr):
         return f"size_of({_fmt_expr(e.expr)})"
     if isinstance(e, AlignOfValueExpr):
@@ -87,7 +93,7 @@ def _fmt_stmt(st, ind: int) -> list[str]:
     if isinstance(st, LetStmt):
         kw = "fixed" if st.fixed else "let"
         mut = "mut " if st.mut and not st.fixed else ""
-        ann = f": {st.type_name}" if st.type_name else ""
+        ann = f": {type_text(st.type_name)}" if st.type_name else ""
         return [f"{p}{kw} {mut}{st.name}{ann} = {_fmt_expr(st.expr)};"]
     if isinstance(st, AssignStmt):
         return [f"{p}{_fmt_expr(st.target)} {st.op} {_fmt_expr(st.expr)};"]
@@ -155,15 +161,16 @@ def _fmt_item(item) -> list[str]:
         alias = f" as {item.alias}" if item.alias else ""
         return [f"import {'::'.join(item.path)}{alias};"]
     if isinstance(item, TypeAliasDecl):
-        return [f"type {item.name} = {item.target};"]
+        return [f"type {item.name} = {type_text(item.target)};"]
     if isinstance(item, StructDecl):
         out = []
         if item.doc:
             out.extend([f"/// {line}" for line in item.doc.splitlines()])
         pub = "pub " if item.pub else ""
-        out.append(f"{pub}struct {item.name} {{")
+        packed = "@packed " if item.packed else ""
+        out.append(f"{pub}{packed}struct {item.name} {{")
         for name, typ in item.fields:
-            out.append(f"    {name} {typ},")
+            out.append(f"    {name} {type_text(typ)},")
         out.append("}")
         return out
     if isinstance(item, EnumDecl):
@@ -174,7 +181,7 @@ def _fmt_item(item) -> list[str]:
         out.append(f"{pub}enum {item.name} {{")
         for name, fields in item.variants:
             if fields:
-                out.append(f"    {name}({', '.join(fields)}),")
+                out.append(f"    {name}({', '.join(type_text(t) for t in fields)}),")
             else:
                 out.append(f"    {name},")
         out.append("}")
@@ -185,8 +192,8 @@ def _fmt_item(item) -> list[str]:
             out.extend([f"/// {line}" for line in item.doc.splitlines()])
         pub = "pub " if item.pub else ""
         us = "unsafe " if item.unsafe else ""
-        sig = ", ".join(f"{n} {t}" for n, t in item.params)
-        out.append(f'{pub}{us}extern "{item.lib}" fn {item.name}({sig}) -> {item.ret};')
+        sig = ", ".join(f"{n} {type_text(t)}" for n, t in item.params)
+        out.append(f'{pub}{us}extern "{item.lib}" fn {item.name}({sig}) -> {type_text(item.ret)};')
         return out
     if isinstance(item, FnDecl):
         out = []
@@ -195,8 +202,8 @@ def _fmt_item(item) -> list[str]:
         pub = "pub " if item.pub else ""
         impl_kw = "impl " if item.is_impl else ""
         async_kw = "async " if item.async_fn else ""
-        sig = ", ".join(f"{n} {t}" for n, t in item.params)
-        out.append(f"{pub}{impl_kw}{async_kw}fn {item.name}({sig}) -> {item.ret} {{")
+        sig = ", ".join(f"{n} {type_text(t)}" for n, t in item.params)
+        out.append(f"{pub}{impl_kw}{async_kw}fn {item.name}({sig}) -> {type_text(item.ret)} {{")
         for st in item.body:
             out.extend(_fmt_stmt(st, 1))
         out.append("}")

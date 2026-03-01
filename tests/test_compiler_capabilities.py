@@ -32,6 +32,13 @@ def test_codegen_includes_memory_runtime_helpers():
     assert "def free(ptr):" in py
 
 
+def test_python_codegen_emits_width_aware_bit_intrinsic_calls():
+    py = to_python(parse("fn main() -> Int { return countOnes(3u4) + leadingZeros(3u4) + trailingZeros(3u4); }"))
+    assert "countOnes(__astra_cast(3, 'u4'), 4)" in py
+    assert "leadingZeros(__astra_cast(3, 'u4'), 4)" in py
+    assert "trailingZeros(__astra_cast(3, 'u4'), 4)" in py
+
+
 def test_python_codegen_freestanding_has_no_auto_main():
     py = to_python(parse("fn kernel() -> Int { return 0; }"), freestanding=True)
     assert "if __name__ == '__main__':" not in py
@@ -192,6 +199,62 @@ fn main() -> Int {
     asm = to_x86_64(prog)
     assert_valid_x86_64_assembly(asm)
     assert "0x000000000000000f" in asm
+
+
+def test_x86_64_supports_packed_struct_field_access_and_update():
+    src = """
+@packed struct Header {
+  version: u4,
+  flags: u3,
+  enabled: u1,
+}
+fn main() -> Int {
+  let mut h = Header(3u4, 5u3, 1u1);
+  h.flags = 2u3;
+  return (h.version as Int) + (h.flags as Int) + (h.enabled as Int);
+}
+"""
+    prog = parse(src)
+    analyze(prog)
+    asm = to_x86_64(prog)
+    assert_valid_x86_64_assembly(asm)
+    assert "mov byte [r11]" in asm
+    assert "shr rax, 4" in asm
+
+
+def test_x86_64_supports_integer_type_intrinsics():
+    src = """
+fn main() -> Int {
+  let a = bitSizeOf(u3);
+  let b: u4 = maxVal(u4);
+  let c: i4 = minVal(i4);
+  let d = countOnes(b as Int);
+  let e = leadingZeros(b as Int);
+  let f = trailingZeros(b as Int);
+  return a + (b as Int) + (c as Int) + d + e + f;
+}
+"""
+    prog = parse(src)
+    analyze(prog)
+    asm = to_x86_64(prog)
+    assert_valid_x86_64_assembly(asm)
+    assert "popcnt" in asm
+    assert ("bsr" in asm) or ("bsf" in asm)
+
+
+def test_x86_64_bit_intrinsics_accept_arbitrary_width_integer_arguments():
+    src = """
+fn main() -> Int {
+  let x: u4 = 3u4;
+  return countOnes(x) + leadingZeros(x) + trailingZeros(x);
+}
+"""
+    prog = parse(src)
+    analyze(prog)
+    asm = to_x86_64(prog)
+    assert_valid_x86_64_assembly(asm)
+    assert "popcnt" in asm
+    assert "mov rax, 4" in asm
 
 
 def test_x86_64_i128_hard_ops_select_helper_symbols_by_overflow_mode():

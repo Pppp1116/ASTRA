@@ -416,7 +416,7 @@ def _fold_ast_expr(expr: Any, env: dict[str, Any], mutable_names: set[str]) -> A
     if isinstance(expr, CastExpr):
         expr.expr = _fold_ast_expr(expr.expr, env, mutable_names)
         return expr
-    if isinstance(expr, (SizeOfTypeExpr, AlignOfTypeExpr)):
+    if isinstance(expr, (SizeOfTypeExpr, AlignOfTypeExpr, BitSizeOfTypeExpr, MaxValTypeExpr, MinValTypeExpr)):
         return expr
     if isinstance(expr, (SizeOfValueExpr, AlignOfValueExpr)):
         expr.expr = _fold_ast_expr(expr.expr, env, mutable_names)
@@ -463,7 +463,7 @@ def _is_pure_expr(expr: Any) -> bool:
         return _is_pure_expr(expr.expr)
     if isinstance(expr, CastExpr):
         return _is_pure_expr(expr.expr)
-    if isinstance(expr, (SizeOfTypeExpr, AlignOfTypeExpr)):
+    if isinstance(expr, (SizeOfTypeExpr, AlignOfTypeExpr, BitSizeOfTypeExpr, MaxValTypeExpr, MinValTypeExpr)):
         return True
     if isinstance(expr, (SizeOfValueExpr, AlignOfValueExpr)):
         return _is_pure_expr(expr.expr)
@@ -496,7 +496,7 @@ def _may_trap_expr(expr: Any) -> bool:
         return _may_trap_expr(expr.expr)
     if isinstance(expr, CastExpr):
         return _may_trap_expr(expr.expr)
-    if isinstance(expr, (SizeOfTypeExpr, AlignOfTypeExpr)):
+    if isinstance(expr, (SizeOfTypeExpr, AlignOfTypeExpr, BitSizeOfTypeExpr, MaxValTypeExpr, MinValTypeExpr)):
         return False
     if isinstance(expr, (SizeOfValueExpr, AlignOfValueExpr)):
         return _may_trap_expr(expr.expr)
@@ -747,7 +747,7 @@ def _used_names_expr(expr: Any) -> set[str]:
         return _used_names_expr(expr.expr)
     if isinstance(expr, CastExpr):
         return _used_names_expr(expr.expr)
-    if isinstance(expr, (SizeOfTypeExpr, AlignOfTypeExpr)):
+    if isinstance(expr, (SizeOfTypeExpr, AlignOfTypeExpr, BitSizeOfTypeExpr, MaxValTypeExpr, MinValTypeExpr)):
         return set()
     if isinstance(expr, (SizeOfValueExpr, AlignOfValueExpr)):
         return _used_names_expr(expr.expr)

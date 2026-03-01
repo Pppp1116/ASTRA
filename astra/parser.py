@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from astra.ast import *
+from astra.int_types import parse_int_type_name
 from astra.lexer import Token, lex
 
 
@@ -107,35 +108,72 @@ class Parser:
         return Program(items)
 
     def parse_top_level(self, doc: str):
-        is_pub = bool(self.opt("pub"))
-        is_unsafe = bool(self.opt("unsafe"))
-        is_async = bool(self.opt("async"))
-        is_impl = bool(self.opt("impl"))
+        is_pub = False
+        is_unsafe = False
+        is_async = False
+        is_impl = False
+        is_packed = False
+        while True:
+            if self.opt("pub"):
+                is_pub = True
+                continue
+            if self.opt("unsafe"):
+                is_unsafe = True
+                continue
+            if self.opt("async"):
+                is_async = True
+                continue
+            if self.opt("impl"):
+                is_impl = True
+                continue
+            if self.opt("@"):
+                attr = self.eat("IDENT").text
+                if attr != "packed":
+                    self._err(f"unknown attribute @{attr}")
+                    raise ParseError(self.errors[-1])
+                is_packed = True
+                continue
+            break
         if self.cur().kind == "import":
             if is_unsafe or is_async:
                 self._err("import cannot be prefixed with unsafe/async")
+                raise ParseError(self.errors[-1])
+            if is_packed:
+                self._err("@packed is only valid on struct declarations")
                 raise ParseError(self.errors[-1])
             return self.parse_import()
         if self.cur().kind == "struct":
             if is_unsafe or is_async:
                 self._err("struct cannot be prefixed with unsafe/async")
                 raise ParseError(self.errors[-1])
-            return self.parse_struct(is_pub, doc)
+            return self.parse_struct(is_pub, doc, packed=is_packed)
         if self.cur().kind == "enum":
             if is_unsafe or is_async:
                 self._err("enum cannot be prefixed with unsafe/async")
+                raise ParseError(self.errors[-1])
+            if is_packed:
+                self._err("@packed is only valid on struct declarations")
                 raise ParseError(self.errors[-1])
             return self.parse_enum(is_pub, doc)
         if self.cur().kind == "type":
             if is_unsafe or is_async:
                 self._err("type alias cannot be prefixed with unsafe/async")
                 raise ParseError(self.errors[-1])
+            if is_packed:
+                self._err("@packed is only valid on struct declarations")
+                raise ParseError(self.errors[-1])
             return self.parse_type_alias()
         if self.cur().kind == "extern":
+            if is_packed:
+                self._err("@packed is only valid on struct declarations")
+                raise ParseError(self.errors[-1])
             return self.parse_extern_fn(is_pub, is_unsafe, doc)
         if self.cur().kind == "fn":
             if is_unsafe:
                 self._err("unsafe is only valid with extern fn")
+                raise ParseError(self.errors[-1])
+            if is_packed:
+                self._err("@packed is only valid on struct declarations")
                 raise ParseError(self.errors[-1])
             return self.parse_fn(is_pub, is_async, doc, is_impl=is_impl)
         if is_impl:
@@ -240,7 +278,7 @@ class Parser:
             col=fn_tok.col,
         )
 
-    def parse_struct(self, is_pub: bool = False, doc: str = "") -> StructDecl:
+    def parse_struct(self, is_pub: bool = False, doc: str = "", packed: bool = False) -> StructDecl:
         tok = self.eat("struct")
         name = self.eat("IDENT").text
         generics = self._parse_generics()
@@ -250,7 +288,7 @@ class Parser:
             fields.append(self._parse_named_type())
             self.opt(",")
         self.eat("}")
-        return StructDecl(name, generics, fields, [], pub=is_pub, doc=doc, pos=tok.pos, line=tok.line, col=tok.col)
+        return StructDecl(name, generics, fields, [], pub=is_pub, packed=packed, doc=doc, pos=tok.pos, line=tok.line, col=tok.col)
 
     def parse_enum(self, is_pub: bool = False, doc: str = "") -> EnumDecl:
         tok = self.eat("enum")
@@ -281,41 +319,50 @@ class Parser:
         self.opt(";")
         return TypeAliasDecl(name, generics, target, tok.pos, tok.line, tok.col)
 
-    def parse_type(self) -> str:
+    def parse_type(self):
         typ: str
         if self.opt("&"):
             mut = "mut " if self.opt("mut") else ""
-            typ = f"&{mut}{self.parse_type()}"
+            typ = f"&{mut}{type_text(self.parse_type())}"
         elif self.opt("["):
             inner = self.parse_type()
             self.eat("]")
-            typ = f"[{inner}]"
+            typ = f"[{type_text(inner)}]"
         elif self.opt("fn"):
             self.eat("(")
             args: list[str] = []
             if self.cur().kind != ")":
-                args.append(self.parse_type())
+                args.append(type_text(self.parse_type()))
                 while self.opt(","):
-                    args.append(self.parse_type())
+                    args.append(type_text(self.parse_type()))
             self.eat(")")
             self.eat("->")
-            typ = f"fn({', '.join(args)}) -> {self.parse_type()}"
+            typ = f"fn({', '.join(args)}) -> {type_text(self.parse_type())}"
         else:
             if self.cur().kind in {"IDENT", "INT_TYPE"}:
+                tok_kind = self.cur().kind
                 name = self.cur().text
                 self.i += 1
             else:
                 self._err(f"expected type name, got {self.cur().kind}", self.cur())
                 raise ParseError(self.errors[-1])
-            typ = name
+            if tok_kind == "INT_TYPE":
+                int_info = parse_int_type_name(name)
+                if int_info is not None:
+                    bits, signed = int_info
+                    typ = str(ArbitraryIntType(signed=signed, width=bits))
+                else:
+                    typ = name
+            else:
+                typ = name
             if self.opt("<"):
-                args = [self.parse_type()]
+                args = [type_text(self.parse_type())]
                 while self.opt(","):
-                    args.append(self.parse_type())
+                    args.append(type_text(self.parse_type()))
                 self.eat(">")
                 typ = f"{name}<{', '.join(args)}>"
         while self.opt("?"):
-            typ = f"Option<{typ}>"
+            typ = f"Option<{type_text(typ)}>"
         return typ
 
     def parse_block(self) -> list[Any]:
@@ -535,6 +582,15 @@ class Parser:
                 if tok.text == "size_of":
                     return SizeOfValueExpr(inner, tok.pos, tok.line, tok.col)
                 return AlignOfValueExpr(inner, tok.pos, tok.line, tok.col)
+            if tok.text in {"bitSizeOf", "maxVal", "minVal"} and self.cur().kind == "(":
+                self.eat("(")
+                typ = self.parse_type()
+                self.eat(")")
+                if tok.text == "bitSizeOf":
+                    return BitSizeOfTypeExpr(typ, tok.pos, tok.line, tok.col)
+                if tok.text == "maxVal":
+                    return MaxValTypeExpr(typ, tok.pos, tok.line, tok.col)
+                return MinValTypeExpr(typ, tok.pos, tok.line, tok.col)
             return Name(tok.text, tok.pos, tok.line, tok.col)
         if self.opt("["):
             elems = []

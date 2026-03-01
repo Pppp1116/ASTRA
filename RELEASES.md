@@ -1,5 +1,11 @@
 # Releases
 
+## v0.2.2
+- Added dynamic-width integer language support across lexer/parser/semantic/codegen (`iN`/`uN`, `N=1..128`) including literal suffixes (for example `15u4`).
+- Added `@packed struct` support with packed layout tracking and packed-field x86-64 access/update lowering.
+- Added type/integer intrinsics: `bitSizeOf(T)`, `maxVal(T)`, `minVal(T)`, `countOnes(x)`, `leadingZeros(x)`, `trailingZeros(x)`.
+- Added width-aware diagnostics for invalid integer widths, `i1` hinting, and implicit integer-width conversions requiring explicit casts.
+
 ## v0.2.1
 - Expanded x86-64/native backend coverage:
   - Added linked Linux x86-64 runtime object for native builds (`astra_print_*`, `astra_alloc/free`, `astra_panic`).

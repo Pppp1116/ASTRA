@@ -40,9 +40,19 @@
 - borrow lifetimes are elided/inferred; returning a reference must tie to an input reference
 - default ownership transfer is move; scalar numerics/`Bool`/shared refs are copy-by-default
 - explicit cast syntax is supported: `expr as Type`
+- integer type syntax supports `iN`/`uN` where `N` is `1..128` (for example `u4`, `i127`)
+- integer literals support suffix typing like `15u4` and `3i7`
+- signed `i1` is rejected with a diagnostic hint (`did you mean u1?`)
 - layout queries are supported:
   - `sizeof(Type)`, `alignof(Type)`
   - `size_of(expr)`, `align_of(expr)` (type-only; expression is not evaluated)
+- integer type queries are supported:
+  - `bitSizeOf(Type)`, `maxVal(Type)`, `minVal(Type)`
+- width-aware integer bit intrinsics are supported:
+  - `countOnes(x)`, `leadingZeros(x)`, `trailingZeros(x)`
+- packed bitfield layout is supported with `@packed struct`
+  - packed fields must be integer or `Bool`
+  - x86-64 packed field lowering currently supports up to 64-bit packed fields
 - numeric overflow control:
   - `build --profile debug|release` (default `debug`)
   - `build/check --overflow trap|wrap|debug`
@@ -50,7 +60,7 @@
 
 ## x86-64 backend contract
 - ABI classes are explicit in backend lowering:
-  - integer/pointer class (`Int`, fixed ints, `isize`/`usize`, refs, fn pointers)
+  - integer/pointer class (`Int`, `iN`/`uN`, `isize`/`usize`, refs, fn pointers)
   - SSE class (`Float`/`f32`/`f64`)
   - 128-bit integer class (`i128`/`u128`) split as low/high 64-bit halves
 - Calling convention:

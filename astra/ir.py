@@ -104,11 +104,17 @@ def _expr(e):
     if isinstance(e, ArrayLit):
         return ("array", [_expr(x) for x in e.elements])
     if isinstance(e, CastExpr):
-        return ("cast", _expr(e.expr), e.type_name)
+        return ("cast", _expr(e.expr), type_text(e.type_name))
     if isinstance(e, SizeOfTypeExpr):
-        return ("sizeof_type", e.type_name)
+        return ("sizeof_type", type_text(e.type_name))
     if isinstance(e, AlignOfTypeExpr):
-        return ("alignof_type", e.type_name)
+        return ("alignof_type", type_text(e.type_name))
+    if isinstance(e, BitSizeOfTypeExpr):
+        return ("bitsizeof_type", type_text(e.type_name))
+    if isinstance(e, MaxValTypeExpr):
+        return ("maxval_type", type_text(e.type_name))
+    if isinstance(e, MinValTypeExpr):
+        return ("minval_type", type_text(e.type_name))
     if isinstance(e, SizeOfValueExpr):
         return ("sizeof_value", _expr(e.expr))
     if isinstance(e, AlignOfValueExpr):
