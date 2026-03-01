@@ -38,6 +38,19 @@ def _diag(code: str, filename: str, line: int, col: int, msg: str) -> str:
     return f"{code} {filename}:{line}:{col}: {msg}"
 
 
+def _parse_int_literal(text: str) -> int:
+    t = text.replace("_", "")
+    if t.startswith(("0x", "0X")):
+        return int(t[2:], 16)
+    if t.startswith(("0b", "0B")):
+        return int(t[2:], 2)
+    return int(t, 10)
+
+
+def _parse_float_literal(text: str) -> float:
+    return float(text.replace("_", ""))
+
+
 class Parser:
     def __init__(self, src: str, filename: str = "<input>"):
         self.filename = filename
@@ -181,14 +194,22 @@ class Parser:
 
     def parse_import(self) -> ImportDecl:
         tok = self.eat("import")
-        path = [self.eat("IDENT").text]
-        while self.opt("::"):
+        path: list[str] = []
+        source: str | None = None
+        if self.cur().kind == "STR":
+            source = self.eat("STR").text
+        else:
             path.append(self.eat("IDENT").text)
+            while True:
+                if self.opt("::") or self.opt("."):
+                    path.append(self.eat("IDENT").text)
+                    continue
+                break
         alias = None
         if self.opt("as"):
             alias = self.eat("IDENT").text
         self.opt(";")
-        return ImportDecl(path, alias, tok.pos, tok.line, tok.col)
+        return ImportDecl(path, alias, tok.pos, tok.line, tok.col, source=source)
 
     def _parse_generics(self) -> list[str]:
         generics: list[str] = []
@@ -566,14 +587,14 @@ class Parser:
             self.eat(")")
             return AlignOfTypeExpr(typ, tok.pos, tok.line, tok.col)
         if self.opt("INT"):
-            lit = Literal(int(tok.text), tok.pos, tok.line, tok.col)
+            lit = Literal(_parse_int_literal(tok.text), tok.pos, tok.line, tok.col)
             nxt = self.cur()
             if nxt.kind == "INT_TYPE" and nxt.pos == tok.pos + len(tok.text):
                 self.i += 1
                 return CastExpr(lit, nxt.text, nxt.pos, nxt.line, nxt.col)
             return lit
         if self.opt("FLOAT"):
-            return Literal(float(tok.text), tok.pos, tok.line, tok.col)
+            return Literal(_parse_float_literal(tok.text), tok.pos, tok.line, tok.col)
         if self.opt("STR"):
             return Literal(tok.text, tok.pos, tok.line, tok.col)
         if self.opt("CHAR"):

@@ -13,9 +13,13 @@ doc_comment     = "///" { any_char - "\n" } ;
 block_comment   = "/*" { any_char } "*/" ;
 
 ident           = ( "_" | letter ) { "_" | letter | digit } ;
-int_lit         = digit { digit } ;
+int_lit         = dec_int_lit | hex_int_lit | bin_int_lit ;
+dec_int_lit     = digit { digit | "_" } ;
+hex_int_lit     = ("0x" | "0X") hex_digit { hex_digit | "_" } ;
+bin_int_lit     = ("0b" | "0B") ("0" | "1") { "0" | "1" | "_" } ;
 int_type_tok    = ("i" | "u") nonzero_digit { digit } ;
-float_lit       = digit { digit } "." digit { digit } ;
+float_lit       = (digit { digit | "_" } "." digit { digit | "_" })
+                | ("." digit { digit | "_" }) ;
 str_lit         = "\"" { char | escape } "\"" ;
 str_multi_lit   = "\"\"\"" { any_char } "\"\"\"" ;
 char_lit        = "'" { char | escape } "'" ;
@@ -121,10 +125,27 @@ expr_stmt       = expr ";" ;
 
 Constraints:
 - `fixed` bindings are immutable and cannot be `mut`.
-- Bare expression statements must type-check to `Void` or `Never`.
+- Expression statements may discard values of any type.
 - `return;` is only valid in `-> Void` functions.
 
-## 4. Type System Rules
+## 4. Module Resolution
+
+```ebnf
+import_decl      = "import" ( module_path | str_lit ) [ "as" ident ] [ ";" ] ;
+module_path      = ident { ("." | "::") ident } ;
+```
+
+Rules:
+- `import std.io;` and `import stdlib::io;` both resolve through stdlib lookup.
+- `import "path/to/mod";` resolves relative to the importing file (absolute paths resolve as-is).
+- Non-stdlib module imports resolve from the nearest ancestor directory containing `Astra.toml`.
+- If no package root is present, non-stdlib module imports resolve relative to the importing file directory.
+- Stdlib lookup order is:
+  - `ASTRA_STDLIB_PATH` (if set)
+  - repository `stdlib/` (dev checkout)
+  - bundled package path `astra/stdlib` (installed package)
+
+## 5. Type System Rules
 
 Core:
 - Primitive roots include `Int`, dynamic-width ints (`iN`/`uN`, `N=1..128`) plus aliases (`isize`, `usize`), `Float` (`f32`, `f64`), `Bool`, `Any`, `Void`, `Never`.
@@ -149,7 +170,7 @@ Unsized:
 - `str` and `[T]` are unsized and cannot be used by value in safe surface syntax.
 - Use behind references/pointers (e.g. `&str`, `&[T]`, `&mut [T]`).
 
-## 5. Move/Borrow Rules
+## 6. Move/Borrow Rules
 
 Copy vs move:
 - Copy types (current): scalar numerics, `Bool`, shared refs (`&T`).
@@ -168,7 +189,7 @@ Owned-state checks:
 - Reassignment of still-live tracked ownership without drop/move is rejected.
 - Function-level live owned leaks are rejected.
 
-## 6. Evaluation Order Guarantees
+## 7. Evaluation Order Guarantees
 
 - Expression evaluation order is strict left-to-right.
 - Binary operators evaluate LHS before RHS.
@@ -183,14 +204,17 @@ Numeric semantics:
 - Implicit conversion between different integer widths/signedness is rejected; explicit cast is required (for example `u4` -> `u8`).
 - Right shift is arithmetic for signed integer types and logical for unsigned integer types.
 - Width-aware integer builtins are available: `countOnes`, `leadingZeros`, `trailingZeros`.
+- Aliases are available: `popcnt`, `clz`, `ctz`.
+- Rotate helpers are available: `rotl`, `rotr` (rotation count is modulo bit width).
 - Type-level integer queries are available: `bitSizeOf(T)`, `maxVal(T)`, `minVal(T)`.
+- JSON conversion for `Any` is shape-stable for arrays/lists and objects/maps.
 - Overflow mode is controlled by build/check configuration:
   - `check`: default effective overflow `trap` (`--overflow debug` also resolves to `trap`)
   - `build --profile debug` => effective default `trap`
   - `build --profile release` => effective default `wrap`
   - `--overflow trap|wrap|debug` overrides defaults (`debug` resolves by profile for `build`)
 
-## 7. Backend-Defined Behavior Boundaries (`py` vs `llvm/native`)
+## 8. Backend-Defined Behavior Boundaries (`py` vs `llvm/native`)
 
 Frontend (lex/parse/semantic) is shared; backend differences begin at lowering/codegen.
 
@@ -210,7 +234,7 @@ Common contract:
 - Packed integer fields in `@packed struct` are supported up to language maximum width (`128`) and lower through byte-window shift/mask operations.
 
 `native` target:
-- Compiles/links emitted LLVM IR with `clang` plus portable runtime (`runtime/llvm_runtime.c`).
+- Compiles/links emitted LLVM IR with `clang` plus bundled portable runtime source (override path with `ASTRA_RUNTIME_C_PATH`).
 - In `--freestanding` mode:
   - hosted/runtime builtins are semantic errors
   - emitted LLVM IR must not reference `astra_*` runtime symbols or non-LLVM external host symbols
@@ -220,7 +244,7 @@ Common contract:
 Normative boundary rule:
 - If a program passes semantic analysis but fails only due to backend lowering limits, failure must be reported as backend-defined (`CODEGEN`) rather than semantic invalidity.
 
-## 8. Diagnostics and Source Span Requirements
+## 9. Diagnostics and Source Span Requirements
 
 Current issue:
 - Some semantic internal checks emit hardcoded `SEM <input>:1:1` (e.g. internal owned-state checks), which hides real source locations.
@@ -246,3 +270,9 @@ Rules:
 - Synthetic/compiler-generated nodes must carry either:
   - parent/trigger span, or
   - explicit synthetic span metadata that points to the nearest user-authored source location.
+- Compiler check mode (`astra check`) must expose deterministic structured diagnostics:
+  - stable `code` identifiers (`ASTRA-*`)
+  - primary span (`filename`, `line`, `col`, `end_line`, `end_col`)
+  - optional note spans for related type/context information
+- LSP diagnostics must be produced from the same check pipeline used by CLI check mode.
+- Check mode should prefer collecting multiple diagnostics in a single run rather than halting at first semantic error.

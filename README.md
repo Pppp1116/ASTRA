@@ -12,7 +12,7 @@ python build/hello.py
 ```
 
 ## Commands
-- `astra`: build/run/check/test (`selfhost` is currently an unavailable placeholder command)
+- `astra`: build/run/check/test/fmt/doc (`selfhost` is currently an unavailable placeholder command)
 - `astpm`: package manager
 - `astfmt`: formatter
 - `astlint`: linter
@@ -23,18 +23,27 @@ python build/hello.py
 
 ## Build options
 - `astra build <in> -o <out> [--target py|llvm|native] [--emit-ir path.ll] [--strict] [--freestanding] [--profile debug|release] [--overflow trap|wrap|debug] [--triple <llvm-triple>]`
-- `astra check <in> [--freestanding] [--overflow trap|wrap|debug]`
+- `astra check <in> [--freestanding] [--overflow trap|wrap|debug] [--json]`
+- `astra check --files <f1> <f2> ... [--freestanding] [--overflow ...] [--json]`
+- `astra check --stdin [--stdin-filename name] [--freestanding] [--overflow ...] [--json]`
 - `astra test [--kind unit|integration|e2e]`
-- `--target native` compiles/links LLVM IR into an executable via `clang` and the portable runtime (`runtime/llvm_runtime.c`).
+- `astra fmt <files...> [--check]`
+- `astra doc <in> -o <out>`
+- `--target native` compiles/links LLVM IR into an executable via `clang` and a bundled portable runtime source (override path with `ASTRA_RUNTIME_C_PATH`).
 - `--freestanding` enforces runtime-free semantics/codegen for LLVM/native outputs:
   - hosted/runtime builtins are rejected during semantic analysis
   - LLVM IR cannot reference `astra_*` runtime symbols or other external host symbols
   - `--target native --freestanding` requires `fn _start()`
   - freestanding container API is `vec_new`, `vec_from`, `vec_len`, `vec_get`, `vec_set`, `vec_push` (no hosted runtime shims)
+- Native regression sweep: `pytest tests/test_build.py -k native` (requires `clang`).
+- LSP diagnostics are produced by the same check pipeline used by `astra check` (stable codes/spans).
 
 ## Syntax notes
 - Immutable locals use `fixed`, mutable/inferred locals use `let`.
 - Preferred typed style is `name: Type` (legacy `name Type` still parses for params/fields).
+- Module imports support both `import std.io;` and legacy `import stdlib::io;`.
+- Path imports use string form: `import "relative/path";` (resolved relative to the importing file).
+- Non-stdlib module imports resolve from nearest package root (`Astra.toml`) when present; otherwise from the importing file directory.
 - Integer types support dynamic widths: `iN`/`uN` where `N` is `1..128` (`Int`/`isize`/`usize` still map to 64-bit).
 - Integer literals support width suffixes (for example `15u4`, `3i7`).
 - Optional values use `Option<T>` + `none` (with `T?` sugar); `Nil` is not a type.
@@ -46,6 +55,6 @@ python build/hello.py
 - Freestanding builds avoid hosted entrypoint assumptions and are suitable for kernels/runtime stubs.
 - `defer expr;` runs cleanup logic at function exit.
 - `a ?? b` coalesces `Option<T>` values (`a: Option<T>`, `b: T`).
-- Bare expression statements must be `Void`/`Never`; use `drop expr;` to discard other values.
+- Expression statements may discard values of any type; `drop expr;` remains available for explicit immediate destruction-style intent.
 - LLVM backend emits validated LLVM IR through `llvmlite` and native builds are performed by `clang`.
 - `i128/u128` helper runtime symbols remain available in the portable runtime for trap/wrap hard-op behavior.

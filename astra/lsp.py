@@ -1,7 +1,8 @@
 import json
-import re
 import sys
 from dataclasses import is_dataclass
+from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 from astra.ast import (
     ComptimeStmt,
@@ -15,6 +16,7 @@ from astra.ast import (
     StructDecl,
     WhileStmt,
 )
+from astra.check import run_check_source
 from astra.parser import ParseError, parse
 from astra.semantic import BUILTIN_SIGS, SemanticError, analyze
 
@@ -69,31 +71,69 @@ def read_msg():
 
 
 def _parse_diagnostics(text: str, uri: str):
-    try:
-        prog = parse(text, filename=uri)
-        analyze(prog, filename=uri)
-        return []
-    except (ParseError, SemanticError) as e:
-        out = []
-        for line in str(e).splitlines():
-            m = re.match(r"^[A-Z]+\s+(.+):(\d+):(\d+):\s+(.*)$", line.strip())
-            if not m:
+    filename = _uri_to_filename(uri)
+    result = run_check_source(text, filename=filename, collect_errors=True)
+    out = []
+    for diag in result.diagnostics:
+        start_line = max(0, diag.span.line - 1)
+        start_col = max(0, diag.span.col - 1)
+        end_line = max(start_line, diag.span.end_line - 1)
+        end_col = max(start_col + 1, diag.span.end_col - 1)
+        item = {
+            "range": {
+                "start": {"line": start_line, "character": start_col},
+                "end": {"line": end_line, "character": end_col},
+            },
+            "severity": 1,
+            "source": "astra",
+            "code": diag.code,
+            "message": diag.message,
+        }
+        related = []
+        for note in diag.notes:
+            if note.span is None:
                 continue
-            ln = max(1, int(m.group(2)))
-            col = max(1, int(m.group(3)))
-            msg = m.group(4)
-            out.append(
+            note_uri = uri if note.span.filename == filename else _filename_to_uri(note.span.filename)
+            related.append(
                 {
-                    "range": {
-                        "start": {"line": ln - 1, "character": col - 1},
-                        "end": {"line": ln - 1, "character": col},
+                    "location": {
+                        "uri": note_uri,
+                        "range": {
+                            "start": {
+                                "line": max(0, note.span.line - 1),
+                                "character": max(0, note.span.col - 1),
+                            },
+                            "end": {
+                                "line": max(0, note.span.end_line - 1),
+                                "character": max(0, note.span.end_col - 1),
+                            },
+                        },
                     },
-                    "severity": 1,
-                    "source": "astra",
-                    "message": msg,
+                    "message": note.message,
                 }
             )
-        return out
+        if related:
+            item["relatedInformation"] = related
+        out.append(item)
+    return out
+
+
+def _uri_to_filename(uri: str) -> str:
+    if uri.startswith("file://"):
+        parsed = urlparse(uri)
+        path = unquote(parsed.path)
+        if parsed.netloc:
+            path = f"/{parsed.netloc}{path}"
+        return path
+    return uri
+
+
+def _filename_to_uri(filename: str) -> str:
+    if filename.startswith("file://"):
+        return filename
+    if filename.startswith("<") and filename.endswith(">"):
+        return filename
+    return Path(filename).resolve().as_uri()
 
 
 def _word_at(text: str, line: int, character: int) -> str:
@@ -116,12 +156,13 @@ def _word_at(text: str, line: int, character: int) -> str:
 
 
 def _parse_and_analyze(text: str, uri: str):
+    filename = _uri_to_filename(uri)
     try:
-        prog = parse(text, filename=uri)
+        prog = parse(text, filename=filename)
     except ParseError:
         return None
     try:
-        analyze(prog, filename=uri)
+        analyze(prog, filename=filename)
     except SemanticError:
         # Keep partially typed AST if semantic analysis stops early.
         pass

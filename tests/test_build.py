@@ -52,6 +52,28 @@ fn main() -> Int { return 0; }
     assert st3 == "built"
 
 
+def test_build_cache_invalidates_when_string_imported_module_changes(tmp_path: Path):
+    src = tmp_path / "main.astra"
+    dep_dir = tmp_path / "deps"
+    dep = dep_dir / "helper.astra"
+    out = tmp_path / "main.py"
+    dep_dir.mkdir()
+    dep.write_text("fn helper() -> Int { return 1; }")
+    src.write_text(
+        """
+import "deps/helper";
+fn main() -> Int { return 0; }
+"""
+    )
+    st1 = build(str(src), str(out), "py")
+    st2 = build(str(src), str(out), "py")
+    dep.write_text("fn helper() -> Int { return 2; }")
+    st3 = build(str(src), str(out), "py")
+    assert st1 in {"built", "cached"}
+    assert st2 == "cached"
+    assert st3 == "built"
+
+
 def test_build_cache_invalidates_when_toolchain_stamp_changes(monkeypatch, tmp_path: Path):
     src = tmp_path / "main.astra"
     out = tmp_path / "main.py"
@@ -301,6 +323,59 @@ fn main() -> Int {
     assert st in {"built", "cached"}
     cp = subprocess.run([str(out)], capture_output=True, text=True)
     assert cp.returncode == 0
+
+
+@pytest.mark.skipif(
+    shutil.which("clang") is None,
+    reason="native target requires clang",
+)
+def test_build_native_supports_string_concatenation(tmp_path: Path):
+    src = tmp_path / "concat.astra"
+    out = tmp_path / "concat.exe"
+    src.write_text(
+        """
+fn main() -> Int {
+  let s = "a" + "b";
+  let t = s + "c";
+  return len(t);
+}
+"""
+    )
+    st = build(str(src), str(out), "native")
+    assert st in {"built", "cached"}
+    cp = subprocess.run([str(out)], capture_output=True, text=True)
+    assert cp.returncode == 3
+
+
+@pytest.mark.skipif(
+    shutil.which("clang") is None,
+    reason="native target requires clang",
+)
+def test_build_native_json_roundtrip_keeps_map_and_list_shapes(tmp_path: Path):
+    src = tmp_path / "json_roundtrip.astra"
+    out = tmp_path / "json_roundtrip.exe"
+    src.write_text(
+        """
+fn main() -> Int {
+  let m = map_new();
+  map_set(m, "k", 7);
+  let xs = list_new();
+  list_push(xs, 1);
+  list_push(xs, 2);
+  map_set(m, "xs", xs);
+  let js = to_json(m);
+  let rt = from_json(js);
+  let k = map_get(rt, "k") as Int;
+  let ys = map_get(rt, "xs");
+  let y1 = list_get(ys, 1) as Int;
+  return k + y1;
+}
+"""
+    )
+    st = build(str(src), str(out), "native")
+    assert st in {"built", "cached"}
+    cp = subprocess.run([str(out)], capture_output=True, text=True)
+    assert cp.returncode == 9
 
 
 @pytest.mark.skipif(

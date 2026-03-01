@@ -54,6 +54,12 @@ from astra.ast import (
 from astra.comptime import run_comptime
 from astra.codegen import to_python
 from astra.llvm_codegen import to_llvm_ir
+from astra.module_resolver import (
+    ModuleResolutionError,
+    resolve_import_path,
+    runtime_source_path,
+    stdlib_root_path,
+)
 from astra.optimizer import optimize_program
 from astra.parser import parse
 from astra.semantic import analyze
@@ -98,20 +104,16 @@ def _toolchain_stamp() -> str:
     for p in _iter_tree_files(_REPO_ROOT / "astra", {".py"}):
         rel = p.relative_to(_REPO_ROOT).as_posix()
         parts.append(f"{rel}:{_sha256_file(p)}")
-    for p in _iter_tree_files(_REPO_ROOT / "runtime"):
-        rel = p.relative_to(_REPO_ROOT).as_posix()
-        parts.append(f"{rel}:{_sha256_file(p)}")
-    for p in _iter_tree_files(_REPO_ROOT / "stdlib", {".astra"}):
-        rel = p.relative_to(_REPO_ROOT).as_posix()
-        parts.append(f"{rel}:{_sha256_file(p)}")
+    runtime_c = runtime_source_path()
+    if runtime_c is not None:
+        parts.append(f"{runtime_c.as_posix()}:{_sha256_file(runtime_c)}")
+    std_root = stdlib_root_path()
+    if std_root is not None:
+        for p in _iter_tree_files(std_root, {".astra"}):
+            rel = p.relative_to(std_root).as_posix()
+            parts.append(f"stdlib:{rel}:{_sha256_file(p)}")
     _TOOLCHAIN_STAMP = _hash("\n".join(parts))
     return _TOOLCHAIN_STAMP
-
-
-def _resolve_import_path(path: list[str], from_file: Path) -> Path:
-    if path and path[0] == "stdlib":
-        return _REPO_ROOT / "stdlib" / f"{path[-1]}.astra"
-    return from_file.parent / f"{'/'.join(path)}.astra"
 
 
 def _collect_input_files(src_file: Path) -> list[Path]:
@@ -134,7 +136,10 @@ def _collect_input_files(src_file: Path) -> list[Path]:
         for item in prog.items:
             if not isinstance(item, ImportDecl):
                 continue
-            dep = _resolve_import_path(item.path, cur).resolve()
+            try:
+                dep = resolve_import_path(item, str(cur))
+            except ModuleResolutionError:
+                continue
             if dep.exists() and dep not in visited:
                 stack.append(dep)
     return sorted(visited)
@@ -389,9 +394,11 @@ def _build_native_llvm(ir_text: str, out_path: str, src_file: Path, *, profile: 
                 str(out),
             ]
         else:
-            runtime_c = Path(__file__).resolve().parent.parent / "runtime" / "llvm_runtime.c"
-            if not runtime_c.exists():
-                raise RuntimeError(f"CODEGEN {src_file}:1:1: missing runtime source at {runtime_c}")
+            runtime_c = runtime_source_path()
+            if runtime_c is None:
+                raise RuntimeError(
+                    f"CODEGEN {src_file}:1:1: missing runtime source; set ASTRA_RUNTIME_C_PATH or install bundled runtime"
+                )
             cmd = [clang, opt_flag, str(ll_path), str(runtime_c), "-lm", "-o", str(out)]
         if triple:
             cmd.insert(1, f"--target={triple}")

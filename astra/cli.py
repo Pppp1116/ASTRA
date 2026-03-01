@@ -1,12 +1,13 @@
 import argparse
+import json
 import subprocess
 import sys
 from pathlib import Path
 
 from astra.build import build
-from astra.comptime import run_comptime
-from astra.parser import parse
-from astra.semantic import analyze
+from astra.check import diagnostics_to_json_list, format_diagnostic, run_check_paths, run_check_source
+from astra.docgen import main as doc_main
+from astra.formatter import fmt
 
 
 def cmd_build(a):
@@ -25,12 +26,60 @@ def cmd_build(a):
 
 
 def cmd_check(a):
-    src = Path(a.input).read_text()
-    prog = parse(src, filename=a.input)
-    overflow_mode = "trap" if a.overflow == "debug" else a.overflow
-    run_comptime(prog, filename=a.input, overflow_mode=overflow_mode)
-    analyze(prog, filename=a.input, freestanding=a.freestanding)
-    print("ok")
+    modes = int(bool(a.stdin)) + int(bool(a.files)) + int(bool(a.input))
+    if modes != 1:
+        raise ValueError("check requires exactly one input mode: <input>, --files, or --stdin")
+    if a.stdin:
+        src = sys.stdin.read()
+        result = run_check_source(
+            src,
+            filename=a.stdin_filename,
+            freestanding=a.freestanding,
+            overflow=a.overflow,
+            collect_errors=True,
+        )
+    elif a.files:
+        result = run_check_paths(
+            a.files,
+            freestanding=a.freestanding,
+            overflow=a.overflow,
+            collect_errors=True,
+        )
+    else:
+        src = Path(a.input).read_text()
+        result = run_check_source(
+            src,
+            filename=a.input,
+            freestanding=a.freestanding,
+            overflow=a.overflow,
+            collect_errors=True,
+        )
+    if a.json:
+        payload = {
+            "ok": result.ok,
+            "files_checked": list(result.files_checked),
+            "diagnostics": diagnostics_to_json_list(result.diagnostics),
+        }
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        if result.ok:
+            if len(result.files_checked) > 1:
+                print(f"ok ({len(result.files_checked)} files)")
+            else:
+                print("ok")
+        else:
+            for diag in result.diagnostics:
+                print(format_diagnostic(diag), file=sys.stderr)
+                for note in diag.notes:
+                    if note.span is None:
+                        print(f"  note: {note.message}", file=sys.stderr)
+                    else:
+                        print(
+                            f"  note: {note.span.filename}:{note.span.line}:{note.span.col}: {note.message}",
+                            file=sys.stderr,
+                        )
+    if not result.ok:
+        raise SystemExit(1)
 
 
 def cmd_run(a):
@@ -48,6 +97,32 @@ def cmd_test(a):
     elif a.kind == "e2e":
         args += ["-k", "e2e"]
     raise SystemExit(subprocess.call(args))
+
+
+def cmd_fmt(a):
+    bad: list[str] = []
+    for path in a.files:
+        fp = Path(path)
+        src = fp.read_text()
+        out = fmt(src)
+        if a.check:
+            if out != src:
+                bad.append(path)
+            continue
+        fp.write_text(out)
+    if a.check:
+        if bad:
+            for path in bad:
+                print(f"not formatted: {path}", file=sys.stderr)
+            raise SystemExit(1)
+        print("ok")
+        return
+    print("formatted")
+
+
+def cmd_doc(a):
+    args = [a.input, "-o", a.output]
+    doc_main(args)
 
 
 def cmd_selfhost(a):
@@ -76,7 +151,11 @@ def main(argv=None):
     b.set_defaults(func=cmd_build)
 
     c = sp.add_parser("check")
-    c.add_argument("input")
+    c.add_argument("input", nargs="?")
+    c.add_argument("--files", nargs="+")
+    c.add_argument("--stdin", action="store_true")
+    c.add_argument("--stdin-filename", default="<stdin>")
+    c.add_argument("--json", action="store_true")
     c.add_argument("--freestanding", action="store_true")
     c.add_argument("--overflow", choices=["trap", "wrap", "debug"], default="trap")
     c.set_defaults(func=cmd_check)
@@ -89,6 +168,16 @@ def main(argv=None):
     t = sp.add_parser("test")
     t.add_argument("--kind", choices=["unit", "integration", "e2e"], default="unit")
     t.set_defaults(func=cmd_test)
+
+    f = sp.add_parser("fmt")
+    f.add_argument("files", nargs="+")
+    f.add_argument("--check", action="store_true")
+    f.set_defaults(func=cmd_fmt)
+
+    d = sp.add_parser("doc")
+    d.add_argument("input")
+    d.add_argument("-o", "--output", required=True)
+    d.set_defaults(func=cmd_doc)
 
     s = sp.add_parser("selfhost")
     s.set_defaults(func=cmd_selfhost)

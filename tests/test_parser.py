@@ -73,6 +73,24 @@ pub fn main() -> Int {
     assert isinstance(fn.body[2], AssignStmt) and fn.body[2].op == "="
 
 
+def test_import_supports_dotted_module_and_string_forms():
+    src = """
+import std.io as io;
+import "../shared/util.astra";
+fn main() -> Int { return 0; }
+"""
+    prog = parse(src)
+    imp_mod = prog.items[0]
+    imp_str = prog.items[1]
+    assert isinstance(imp_mod, ImportDecl)
+    assert imp_mod.path == ["std", "io"]
+    assert imp_mod.source is None
+    assert imp_mod.alias == "io"
+    assert isinstance(imp_str, ImportDecl)
+    assert imp_str.path == []
+    assert imp_str.source == "../shared/util.astra"
+
+
 def test_parse_extern_and_async_await():
     src = """
 /// ffi sum
@@ -254,6 +272,15 @@ def test_parse_integer_literal_type_suffix():
     assert isinstance(fn.body[0], LetStmt)
     assert isinstance(fn.body[0].expr, CastExpr)
     assert fn.body[0].expr.type_name == "u4"
+
+
+def test_parse_prefixed_integer_literals_and_suffixes():
+    src = "fn main() -> Int { let a = 0xFF_FF; let b = 0b1010_0101u16; return (a as Int) + (b as Int); }"
+    prog = parse(src)
+    fn = prog.items[0]
+    assert fn.body[0].expr.value == 65535
+    assert isinstance(fn.body[1].expr, CastExpr)
+    assert fn.body[1].expr.type_name == "u16"
 
 
 def test_parse_packed_struct_attribute():

@@ -140,6 +140,10 @@ def _is_float_type(typ: str) -> bool:
     return _canonical_type(typ) in {"Float", "f32", "f64"}
 
 
+def _is_text_type(typ: str) -> bool:
+    return _canonical_type(typ) in {"String", "str", "&str", "&mut str"}
+
+
 def _split_top_level(text: str, sep: str) -> list[str]:
     out: list[str] = []
     depth_angle = 0
@@ -441,6 +445,22 @@ def _coerce_value(ctx: _ModuleCtx, state: _FnState, v: ir.Value, from_ty: str, t
     b = state.builder
     i64 = ir.IntType(64)
 
+    if _is_option_type(to_c):
+        lt_opt = _llvm_type(ctx, to_c)
+        if _is_option_type(from_c):
+            if isinstance(v.type, ir.PointerType) and v.type != lt_opt:
+                return b.bitcast(v, lt_opt)
+            return v
+        inner = _option_inner_type(to_c)
+        inner_v = _coerce_value(ctx, state, v, from_c, inner, node)
+        sz, al = _storage_size_align(ctx, inner, node)
+        mem = _alloc_bytes(ctx, state, ir.Constant(i64, sz), ir.Constant(i64, al), node)
+        inner_ptr = b.bitcast(mem, _llvm_type(ctx, inner).as_pointer())
+        b.store(inner_v, inner_ptr)
+        if mem.type != lt_opt:
+            return b.bitcast(mem, lt_opt)
+        return mem
+
     if from_c == "Any":
         any_v = v
         if not (isinstance(any_v.type, ir.IntType) and any_v.type.width == 64):
@@ -524,6 +544,18 @@ def _coerce_value(ctx: _ModuleCtx, state: _FnState, v: ir.Value, from_ty: str, t
     lt = _llvm_type(ctx, to_c)
     if lf == lt:
         return v
+    if from_c == "Bool" and isinstance(lt, ir.IntType):
+        if lt.width == 1:
+            return v
+        return b.zext(v, lt)
+    if to_c == "Bool" and isinstance(lf, ir.IntType):
+        if lf.width == 1:
+            return v
+        return b.icmp_unsigned("!=", v, ir.Constant(lf, 0))
+    if from_c == "Bool" and isinstance(lt, (ir.FloatType, ir.DoubleType)):
+        return b.uitofp(v, lt)
+    if to_c == "Bool" and isinstance(lf, (ir.FloatType, ir.DoubleType)):
+        return b.fcmp_ordered("!=", v, ir.Constant(lf, 0.0))
     if isinstance(lf, ir.IntType) and isinstance(lt, ir.IntType):
         if lf.width > lt.width:
             return b.trunc(v, lt)
@@ -600,8 +632,23 @@ def _expr_type(state: _FnState, e: Any) -> str:
                 return "Void"
             if name in {"alloc", "__alloc"}:
                 return "usize"
-            if name in {"countOnes", "leadingZeros", "trailingZeros", "__countOnes", "__leadingZeros", "__trailingZeros"}:
+            if name in {
+                "countOnes",
+                "leadingZeros",
+                "trailingZeros",
+                "popcnt",
+                "clz",
+                "ctz",
+                "__countOnes",
+                "__leadingZeros",
+                "__trailingZeros",
+                "__popcnt",
+                "__clz",
+                "__ctz",
+            }:
                 return "Int"
+            if name in {"rotl", "rotr", "__rotl", "__rotr"} and e.args:
+                return _expr_type(state, e.args[0])
             if name in {"vec_new", "__vec_new", "vec_from", "__vec_from"}:
                 return "Any"
             if name in {"vec_len", "__vec_len", "vec_set", "__vec_set", "vec_push", "__vec_push"}:
@@ -676,6 +723,8 @@ def _declare_runtime(ctx: _ModuleCtx, name: str) -> ir.Function:
         fnty = ir.FunctionType(i64, [i64])
     elif name == "astra_len_str":
         fnty = ir.FunctionType(i64, [i8p])
+    elif name == "astra_str_concat":
+        fnty = ir.FunctionType(i8p, [i8p, i8p])
     elif name == "astra_read_file":
         fnty = ir.FunctionType(i8p, [i8p])
     elif name == "astra_write_file":
@@ -1053,6 +1102,38 @@ def _lower_count_like(ctx: _ModuleCtx, state: _FnState, call: Call, op: str) -> 
     if bits > 64:
         out64 = state.builder.trunc(out64, ir.IntType(64))
     return _Value(out64, "Int")
+
+
+def _lower_rotate(ctx: _ModuleCtx, state: _FnState, call: Call, left: bool, overflow_mode: str) -> _Value:
+    if len(call.args) != 2:
+        name = "rotl" if left else "rotr"
+        raise CodegenError(_diag(call, f"{name} expects 2 arguments"))
+    x = _compile_expr(ctx, state, call.args[0], overflow_mode=overflow_mode)
+    info = _int_info(x.ty)
+    if info is None:
+        name = "rotl" if left else "rotr"
+        raise CodegenError(_diag(call, f"{name} expects integer arg 0"))
+    bits, _ = info
+    rhs = _compile_expr(ctx, state, call.args[1], overflow_mode=overflow_mode)
+    rhs64 = _coerce_value(ctx, state, rhs.value, rhs.ty, "Int", call.args[1])
+    xt = _coerce_value(ctx, state, x.value, x.ty, x.ty, call.args[0])
+    b = state.builder
+    n64 = b.urem(rhs64, ir.Constant(ir.IntType(64), bits))
+    if xt.type.width == 64:
+        n = n64
+    elif xt.type.width < 64:
+        n = b.trunc(n64, xt.type)
+    else:
+        n = b.zext(n64, xt.type)
+    bits_v = ir.Constant(xt.type, bits)
+    inv = b.urem(b.sub(bits_v, n), bits_v)
+    if left:
+        a = b.shl(xt, n)
+        c = b.lshr(xt, inv)
+    else:
+        a = b.lshr(xt, n)
+        c = b.shl(xt, inv)
+    return _Value(b.or_(a, c), x.ty)
 
 
 def _i128_helper_symbol(op: str, signed: bool, overflow_mode: str) -> str:
@@ -1548,8 +1629,19 @@ def _compile_builtin_call(ctx: _ModuleCtx, state: _FnState, call: Call, name: st
         b.unreachable()
         return _Value(ir.Constant(i64, 0), "Never")
 
-    if base in {"countOnes", "leadingZeros", "trailingZeros"}:
-        return _lower_count_like(ctx, state, call, base)
+    if base in {"countOnes", "leadingZeros", "trailingZeros", "popcnt", "clz", "ctz"}:
+        op = {
+            "countOnes": "countOnes",
+            "popcnt": "countOnes",
+            "leadingZeros": "leadingZeros",
+            "clz": "leadingZeros",
+            "trailingZeros": "trailingZeros",
+            "ctz": "trailingZeros",
+        }[base]
+        return _lower_count_like(ctx, state, call, op)
+
+    if base in {"rotl", "rotr"}:
+        return _lower_rotate(ctx, state, call, left=(base == "rotl"), overflow_mode=overflow_mode)
 
     if base == "await_result":
         if len(call.args) != 1:
@@ -1688,6 +1780,11 @@ def _compile_call(ctx: _ModuleCtx, state: _FnState, call: Call, overflow_mode: s
             "countOnes",
             "leadingZeros",
             "trailingZeros",
+            "popcnt",
+            "clz",
+            "ctz",
+            "rotl",
+            "rotr",
             "vec_new",
             "vec_from",
             "vec_len",
@@ -1734,6 +1831,11 @@ def _compile_call(ctx: _ModuleCtx, state: _FnState, call: Call, overflow_mode: s
             "__countOnes",
             "__leadingZeros",
             "__trailingZeros",
+            "__popcnt",
+            "__clz",
+            "__ctz",
+            "__rotl",
+            "__rotr",
             "__vec_new",
             "__vec_from",
             "__vec_len",
@@ -1823,8 +1925,23 @@ def _compile_expr(ctx: _ModuleCtx, state: _FnState, e: Any, overflow_mode: str =
     if isinstance(e, AwaitExpr):
         return _compile_expr(ctx, state, e.expr, overflow_mode=overflow_mode)
     if isinstance(e, CastExpr):
-        src = _compile_expr(ctx, state, e.expr, overflow_mode=overflow_mode)
         dst_ty = _canonical_type(e.type_name)
+        if isinstance(e.expr, Call) and isinstance(e.expr.fn, Name):
+            base = e.expr.fn.value[2:] if e.expr.fn.value.startswith("__") else e.expr.fn.value
+            if _is_vec_type(dst_ty) and base in {"vec_new", "vec_from"}:
+                had_prev = hasattr(e.expr, "inferred_type")
+                prev = getattr(e.expr, "inferred_type", None)
+                setattr(e.expr, "inferred_type", dst_ty)
+                try:
+                    src = _compile_expr(ctx, state, e.expr, overflow_mode=overflow_mode)
+                finally:
+                    if not had_prev:
+                        delattr(e.expr, "inferred_type")
+                    else:
+                        setattr(e.expr, "inferred_type", prev)
+                cv = _coerce_value(ctx, state, src.value, src.ty, dst_ty, e)
+                return _Value(cv, dst_ty)
+        src = _compile_expr(ctx, state, e.expr, overflow_mode=overflow_mode)
         cv = _coerce_value(ctx, state, src.value, src.ty, dst_ty, e)
         return _Value(cv, dst_ty)
     if isinstance(e, Unary):
@@ -1932,6 +2049,12 @@ def _compile_expr(ctx: _ModuleCtx, state: _FnState, e: Any, overflow_mode: str =
 
         left = _compile_expr(ctx, state, e.left, overflow_mode=overflow_mode)
         right = _compile_expr(ctx, state, e.right, overflow_mode=overflow_mode)
+        if e.op == "+" and _is_text_type(left.ty) and _is_text_type(right.ty):
+            lsp = _coerce_value(ctx, state, left.value, left.ty, "String", e.left)
+            rsp = _coerce_value(ctx, state, right.value, right.ty, "String", e.right)
+            fn = _declare_runtime(ctx, "astra_str_concat")
+            out = b.call(fn, [lsp, rsp])
+            return _Value(out, "String")
         ty = _expr_type(state, e.left)
 
         if _is_float_type(ty):
@@ -2195,6 +2318,15 @@ def _compile_stmt(ctx: _ModuleCtx, state: _FnState, st: Any, overflow_mode: str)
             lhs = _Value(b.load(ptr), ty)
             lv = lhs
             rv = _Value(_coerce_value(ctx, state, rhs.value, rhs.ty, ty, st), ty)
+            if _is_text_type(ty):
+                if st.op != "+=":
+                    raise CodegenError(_diag(st, f"internal: unexpected assignment op {st.op} for text type"))
+                fn = _declare_runtime(ctx, "astra_str_concat")
+                lsp = _coerce_value(ctx, state, lv.value, lv.ty, "String", st.target)
+                rsp = _coerce_value(ctx, state, rv.value, rv.ty, "String", st.expr)
+                out = b.call(fn, [lsp, rsp])
+                b.store(out, ptr)
+                return
             if _is_float_type(ty):
                 if st.op == "+=":
                     out = b.fadd(lv.value, rv.value)
@@ -2310,6 +2442,15 @@ def _compile_stmt(ctx: _ModuleCtx, state: _FnState, st: Any, overflow_mode: str)
                 b.store(rv, fld)
                 return
             lv = b.load(fld)
+            if _is_text_type(fty):
+                if st.op != "+=":
+                    raise CodegenError(_diag(st, f"internal: unexpected field assignment op {st.op} for text type"))
+                fn = _declare_runtime(ctx, "astra_str_concat")
+                lsp = _coerce_value(ctx, state, lv, fty, "String", st.target)
+                rsp = _coerce_value(ctx, state, rv, fty, "String", st.expr)
+                out = b.call(fn, [lsp, rsp])
+                b.store(out, fld)
+                return
             if _is_float_type(fty):
                 if st.op == "+=":
                     out = b.fadd(lv, rv)
@@ -2368,6 +2509,15 @@ def _compile_stmt(ctx: _ModuleCtx, state: _FnState, st: Any, overflow_mode: str)
                 b.store(rv, elem_ptr)
                 return
             lv = b.load(elem_ptr)
+            if _is_text_type(elem_ty):
+                if st.op != "+=":
+                    raise CodegenError(_diag(st, f"internal: unexpected index assignment op {st.op} for text type"))
+                fn = _declare_runtime(ctx, "astra_str_concat")
+                lsp = _coerce_value(ctx, state, lv, elem_ty, "String", st.target)
+                rsp = _coerce_value(ctx, state, rv, elem_ty, "String", st.expr)
+                out = b.call(fn, [lsp, rsp])
+                b.store(out, elem_ptr)
+                return
             if _is_float_type(elem_ty):
                 if st.op == "+=":
                     out = b.fadd(lv, rv)

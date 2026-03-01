@@ -55,3 +55,20 @@ def test_invalid_integer_width_tokens_emit_lex_error():
     errs = [t for t in toks if t.kind == "ERROR"]
     assert len(errs) >= 2
     assert all("integer width must be between" in t.text for t in errs[:2])
+
+
+def test_lexes_prefixed_and_separator_integer_literals():
+    toks = lex("let a = 0xFF_FF; let b = 0b1010_0101; let c = 1_000_000; let d = 123u32;")
+    ints = [t.text for t in toks if t.kind == "INT"]
+    assert "0xFF_FF" in ints
+    assert "0b1010_0101" in ints
+    assert "1_000_000" in ints
+    assert "123" in ints
+    assert any(t.kind == "INT_TYPE" and t.text == "u32" for t in toks)
+
+
+def test_invalid_separator_literals_emit_lex_error():
+    toks = lex("let a = 1__2; let b = 0x_FF; let c = 0b;")
+    errs = [t for t in toks if t.kind == "ERROR"]
+    assert len(errs) >= 3
+    assert all("invalid numeric literal" in t.text for t in errs)

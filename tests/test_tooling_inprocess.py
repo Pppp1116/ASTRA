@@ -68,6 +68,7 @@ def test_lsp_helpers_and_main_dispatch(monkeypatch):
     assert astra.lsp._word_at("fn main() -> Int {}", 0, 1) == "fn"
     diags = astra.lsp._parse_diagnostics('fn main() -> Int { return "x"; }', "<mem>")
     assert diags
+    assert diags[0]["code"] == "ASTRA-TYPE-0001"
 
     src = (
         "fn add(x Int) -> Int { return x; }\n"

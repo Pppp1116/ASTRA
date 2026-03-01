@@ -2,11 +2,15 @@
 
 ## CLI
 - `astra build <in> -o <out> [--target py|llvm|native] [--emit-ir out.ll] [--strict] [--freestanding] [--profile debug|release] [--overflow trap|wrap|debug] [--triple <llvm-triple>]`
-- `astra check <in> [--freestanding] [--overflow trap|wrap|debug]`
+- `astra check <in> [--freestanding] [--overflow trap|wrap|debug] [--json]`
+- `astra check --files <f1> <f2> ... [--freestanding] [--overflow ...] [--json]`
+- `astra check --stdin [--stdin-filename name] [--freestanding] [--overflow ...] [--json]`
 - `astra run <in> [args...]`
 - `astra test [--kind unit|integration|e2e]`
+- `astra fmt <files...> [--check]`
+- `astra doc <in> -o <out>`
 - `astra selfhost` (currently unavailable: placeholder only, no real self-hosting pipeline)
-- `--target native` requires `clang` in `PATH` and links against the portable runtime (`runtime/llvm_runtime.c`).
+- `--target native` requires `clang` in `PATH` and links against bundled runtime source (override with `ASTRA_RUNTIME_C_PATH`).
 - `--freestanding` enforces runtime-free semantics/codegen for LLVM/native outputs:
   - hosted/runtime builtins are rejected in semantic analysis
   - emitted LLVM IR cannot reference `astra_*` runtime symbols or non-LLVM external host symbols
@@ -19,11 +23,18 @@
 - `astlint <file>`
 - `astdoc <in> -o <out>`
 - `astlsp`
+- LSP diagnostics delegate to the compiler check pipeline (`astra check` equivalent), so codes/spans stay consistent between CLI and editor.
 - `astdbg <py script>`
 - `astprof <py script>`
 
 ## Standard library modules
 - core, collections, io, net, serde, process, time, crypto
+- module import syntax:
+  - `import std.io;` (preferred, package-managed stdlib)
+  - `import stdlib::io;` (legacy supported)
+  - `import "relative/path";` (relative to importing source file)
+- non-stdlib module imports resolve from nearest package root containing `Astra.toml`; if none exists, they resolve relative to the importing file directory.
+- stdlib lookup order: `ASTRA_STDLIB_PATH` -> repo `stdlib/` (dev checkout) -> bundled `astra/stdlib` (installed package)
 - syntax guide: `docs/language-syntax-book.md`
 
 ## Language conveniences
@@ -33,7 +44,7 @@
 - option coalescing: `<a> ?? <b>` where `<a>: Option<T>`
 - immutable bindings: `fixed name[: Type] = expr;`
 - option literal: `none` (only valid in `Option<T>` context)
-- bare expression statements must be `Void` or `Never`
+- expression statements may discard values of any type
 - typed params/fields accept `name Type` and `name: Type` (canonical style is `name: Type`)
 - specialization impls: `impl fn name(...) -> ... { ... }`
 - compile-time execution: `comptime { ... }` (pure/deterministic subset with control flow and function-typed call support)

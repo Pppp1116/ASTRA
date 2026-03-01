@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
-from pathlib import Path
 
 from astra.ast import *
 from astra.int_types import is_int_type_name, parse_int_type_name
 from astra.layout import LayoutError, canonical_type as _layout_canonical_type, layout_of_type
+from astra.module_resolver import ModuleResolutionError, resolve_import_path
 
 
 class SemanticError(Exception):
@@ -103,6 +103,11 @@ def _is_float_type(typ: str) -> bool:
     return _canonical_type(typ) in {"Float", "f32", "f64"}
 
 
+def _is_text_type(typ: str) -> bool:
+    c = _canonical_type(typ)
+    return c in {"String", "str", "&str", "&mut str"}
+
+
 def _is_numeric_scalar_type(typ: str) -> bool:
     return _is_int_type(typ) or _is_float_type(typ)
 
@@ -190,6 +195,11 @@ BUILTIN_SIGS: dict[str, BuiltinSig] = {
     "countOnes": BuiltinSig(["Any"], "Int"),
     "leadingZeros": BuiltinSig(["Any"], "Int"),
     "trailingZeros": BuiltinSig(["Any"], "Int"),
+    "popcnt": BuiltinSig(["Any"], "Int"),
+    "clz": BuiltinSig(["Any"], "Int"),
+    "ctz": BuiltinSig(["Any"], "Int"),
+    "rotl": BuiltinSig(["Any", "Any"], "Any"),
+    "rotr": BuiltinSig(["Any", "Any"], "Any"),
     "vec_new": BuiltinSig([], "Any"),
     "vec_from": BuiltinSig(["Any"], "Any"),
     "vec_len": BuiltinSig(["Any"], "Int"),
@@ -504,6 +514,8 @@ def _same_type(expected: str, actual: str) -> bool:
         return _same_type(expected[1:], actual[5:])
     if _is_option_type(expected) and _is_option_type(actual):
         return _same_type(_option_inner(expected), _option_inner(actual))
+    if _is_option_type(expected) and not _is_option_type(actual):
+        return _same_type(_option_inner(expected), actual)
     if {expected, actual} == {"String", "str"}:
         return True
     if expected == "&str" and actual in {"String", "str", "&str"}:
@@ -556,6 +568,10 @@ def _cast_supported(src: str, dst: str) -> bool:
     src_c = _canonical_type(src)
     dst_c = _canonical_type(dst)
     if _is_numeric_scalar_type(src_c) and _is_numeric_scalar_type(dst_c):
+        return True
+    if src_c == "Bool" and (_is_numeric_scalar_type(dst_c) or dst_c == "Bool"):
+        return True
+    if dst_c == "Bool" and (_is_numeric_scalar_type(src_c) or src_c == "Bool"):
         return True
     if src_c == "Any":
         return _is_any_dynamic_cast_target(dst_c)
@@ -645,7 +661,7 @@ def _require_compound_assign_compat(filename: str, line: int, col: int, op: str,
             return
         if _is_float_type(lc) and _is_float_type(rc):
             return
-        if bop == "+" and lc in {"String", "str"} and rc in {"String", "str"}:
+        if bop == "+" and _is_text_type(lc) and _is_text_type(rc):
             return
         raise SemanticError(_diag(filename, line, col, f"operator {op} requires matching numeric types; use explicit cast"))
     if bop in {"&", "|", "^", "<<", ">>"}:
@@ -669,19 +685,6 @@ def _ref_return_tied_to_param(expr: Any, ref_param_names: set[str], borrow: _Bor
         info = borrow.ref_bindings.get(expr.value)
         return info is not None and info.owner in ref_param_names
     return False
-
-
-def _resolve_import(path: list[str], filename: str, line: int, col: int):
-    root = Path(__file__).resolve().parent.parent
-    if not path:
-        raise SemanticError(_diag(filename, line, col, "empty import path"))
-    if path[0] == "stdlib":
-        mod = root / "stdlib" / f"{path[-1]}.astra"
-    else:
-        base = Path(filename).resolve().parent if filename != "<input>" else root
-        mod = base / f"{'/'.join(path)}.astra"
-    if not mod.exists():
-        raise SemanticError(_diag(filename, line, col, f"cannot resolve import {'::'.join(path)}"))
 
 
 def _lookup(name: str, scopes: list[dict[str, str]]) -> str | None:
@@ -960,37 +963,62 @@ def _choose_impl(
     return best[0]
 
 
-def analyze(prog: Program, filename: str = "<input>", freestanding: bool = False):
+def analyze(
+    prog: Program,
+    filename: str = "<input>",
+    freestanding: bool = False,
+    *,
+    collect_errors: bool = False,
+):
     _FREESTANDING_MODE_STACK.append(freestanding)
     try:
+        errors: list[str] = []
+        seen_errors: set[str] = set()
+
+        def _record(err: SemanticError) -> None:
+            if not collect_errors:
+                raise err
+            for line in str(err).splitlines():
+                if line in seen_errors:
+                    continue
+                seen_errors.add(line)
+                errors.append(line)
+
         fn_groups: dict[str, list[FnDecl | ExternFnDecl]] = {}
         structs: dict[str, StructDecl] = {}
         enums: dict[str, EnumDecl] = {}
         for item in prog.items:
-            if isinstance(item, ImportDecl):
-                _resolve_import(item.path, filename, item.line, item.col)
-                continue
-            if isinstance(item, StructDecl):
-                for _, field_ty in item.fields:
-                    _validate_decl_type(field_ty, filename, item.line, item.col)
-                if item.packed:
+            try:
+                if isinstance(item, ImportDecl):
+                    try:
+                        resolve_import_path(item, filename)
+                    except ModuleResolutionError as err:
+                        raise SemanticError(_diag(filename, item.line, item.col, str(err))) from err
+                    continue
+                if isinstance(item, StructDecl):
                     for _, field_ty in item.fields:
-                        c = _canonical_type(field_ty)
-                        if c != "Bool" and not _is_int_type(c):
-                            raise SemanticError(_diag(filename, item.line, item.col, "packed struct fields must be integer or bool types"))
-                structs[item.name] = item
+                        _validate_decl_type(field_ty, filename, item.line, item.col)
+                    if item.packed:
+                        for _, field_ty in item.fields:
+                            c = _canonical_type(field_ty)
+                            if c != "Bool" and not _is_int_type(c):
+                                raise SemanticError(_diag(filename, item.line, item.col, "packed struct fields must be integer or bool types"))
+                    structs[item.name] = item
+                    continue
+                if isinstance(item, TypeAliasDecl):
+                    _validate_decl_type(item.target, filename, item.line, item.col)
+                    continue
+                if isinstance(item, EnumDecl):
+                    enums[item.name] = item
+                    continue
+                if isinstance(item, (FnDecl, ExternFnDecl)):
+                    for _, pty in item.params:
+                        _validate_decl_type(pty, filename, item.line, item.col)
+                    _validate_decl_type(item.ret, filename, item.line, item.col)
+                    fn_groups.setdefault(item.name, []).append(item)
+            except SemanticError as err:
+                _record(err)
                 continue
-            if isinstance(item, TypeAliasDecl):
-                _validate_decl_type(item.target, filename, item.line, item.col)
-                continue
-            if isinstance(item, EnumDecl):
-                enums[item.name] = item
-                continue
-            if isinstance(item, (FnDecl, ExternFnDecl)):
-                for _, pty in item.params:
-                    _validate_decl_type(pty, filename, item.line, item.col)
-                _validate_decl_type(item.ret, filename, item.line, item.col)
-                fn_groups.setdefault(item.name, []).append(item)
 
         for name, decls in fn_groups.items():
             if len(decls) == 1 and not (isinstance(decls[0], FnDecl) and decls[0].is_impl):
@@ -1002,19 +1030,28 @@ def analyze(prog: Program, filename: str = "<input>", freestanding: bool = False
                     d.symbol = f"{name}__impl{i}"
 
         if not freestanding:
-            mains = [d for d in fn_groups.get("main", []) if isinstance(d, FnDecl)]
-            if not mains:
-                raise SemanticError(_diag(filename, 1, 1, "missing main()"))
-            if len(mains) != 1:
-                raise SemanticError(_diag(filename, mains[0].line, mains[0].col, "main() must have a single unambiguous impl"))
-            if mains[0].is_impl:
-                raise SemanticError(_diag(filename, mains[0].line, mains[0].col, "main() cannot be declared with impl"))
+            try:
+                mains = [d for d in fn_groups.get("main", []) if isinstance(d, FnDecl)]
+                if not mains:
+                    raise SemanticError(_diag(filename, 1, 1, "missing main()"))
+                if len(mains) != 1:
+                    raise SemanticError(_diag(filename, mains[0].line, mains[0].col, "main() must have a single unambiguous impl"))
+                if mains[0].is_impl:
+                    raise SemanticError(_diag(filename, mains[0].line, mains[0].col, "main() cannot be declared with impl"))
+            except SemanticError as err:
+                _record(err)
 
         for decls in fn_groups.values():
             for fn in decls:
                 if isinstance(fn, ExternFnDecl):
                     continue
-                _analyze_fn(fn, fn_groups, structs, enums, filename)
+                try:
+                    _analyze_fn(fn, fn_groups, structs, enums, filename)
+                except SemanticError as err:
+                    _record(err)
+                    continue
+        if errors:
+            raise SemanticError("\n".join(errors))
     finally:
         _FREESTANDING_MODE_STACK.pop()
 
@@ -1484,16 +1521,7 @@ def _check_stmt(
             raise SemanticError(_diag(filename, st.line, st.col, "non-exhaustive match for Bool"))
         return
     if isinstance(st, ExprStmt):
-        ty = _infer(st.expr, scopes, fixed_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok)
-        if ty not in {"Void", "Never"}:
-            raise SemanticError(
-                _diag(
-                    filename,
-                    st.line,
-                    st.col,
-                    f"expression statement must be Void or Never, got {ty}; use `let _ = expr;` to discard values",
-                )
-            )
+        _infer(st.expr, scopes, fixed_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok)
         if _is_free_call(st.expr):
             ptr = st.expr.args[0]
             if not isinstance(ptr, Name):
@@ -1540,7 +1568,7 @@ def _infer(
             return _typed(e, "Int")
         if isinstance(e.value, float):
             return _typed(e, "Float")
-        return _typed(e, "&str")
+        return _typed(e, "String")
     if isinstance(e, Name):
         local = _lookup(e.value, scopes)
         if local is not None:
@@ -1669,9 +1697,8 @@ def _infer(
         l = _infer(e.left, scopes, fixed_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok)
         r = _infer(e.right, scopes, fixed_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok)
         if e.op in {"+", "-", "*", "/", "%"}:
-            if l in {"String", "str", "Any"} or r in {"String", "str", "Any"}:
-                if e.op == "+" and (l in {"String", "str"} or r in {"String", "str"}):
-                    return _typed(e, "String")
+            if e.op == "+" and _is_text_type(l) and _is_text_type(r):
+                return _typed(e, "String")
             if _is_int_type(l) and _is_int_type(r):
                 _require_strict_int_operands(filename, e.line, e.col, e.op, l, r)
                 return _typed(e, _canonical_type(l))
@@ -1864,13 +1891,23 @@ def _infer_call(
                     _require_sync(_strip_ref(aty), structs, filename, arg.line, arg.col, f"spawn arg {i}")
             _require_send(worker_ret_ty, structs, filename, e.line, e.col, "spawn worker return")
             return "Int"
-        if builtin_base in {"countOnes", "leadingZeros", "trailingZeros"}:
+        if builtin_base in {"countOnes", "leadingZeros", "trailingZeros", "popcnt", "clz", "ctz"}:
             if len(e.args) != 1:
                 raise SemanticError(_diag(filename, e.line, e.col, f"{name} expects 1 args, got {len(e.args)}"))
             aty = arg_types[0]
             if not _is_int_type(aty):
                 raise SemanticError(_diag(filename, e.args[0].line, e.args[0].col, f"{name} expects an integer argument, got {aty}"))
             return "Int"
+        if builtin_base in {"rotl", "rotr"}:
+            if len(e.args) != 2:
+                raise SemanticError(_diag(filename, e.line, e.col, f"{name} expects 2 args, got {len(e.args)}"))
+            vty = arg_types[0]
+            sty = arg_types[1]
+            if not _is_int_type(vty):
+                raise SemanticError(_diag(filename, e.args[0].line, e.args[0].col, f"{name} expects integer arg 0, got {vty}"))
+            if not _is_int_type(sty):
+                raise SemanticError(_diag(filename, e.args[1].line, e.args[1].col, f"{name} expects integer arg 1, got {sty}"))
+            return _canonical_type(vty)
         if builtin_base == "vec_new":
             if len(e.args) != 0:
                 raise SemanticError(_diag(filename, e.line, e.col, f"{name} expects 0 args, got {len(e.args)}"))

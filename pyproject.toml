@@ -33,6 +33,9 @@ astprof = "astra.profiler:main"
 include = ["astra*"]
 exclude = ["tests*", "docs*", "benchmarks*", "stdlib*", "runtime*", "selfhost*"]
 
+[tool.setuptools.package-data]
+astra = ["stdlib/*.astra", "assets/runtime/llvm_runtime.c"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 

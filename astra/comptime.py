@@ -108,7 +108,20 @@ class _Evaluator:
             if len(args) != 1:
                 raise ComptimeError(_diag(self.filename, node.line, node.col, "len expects 1 argument"))
             return len(args[0])
-        if name in {"countOnes", "__countOnes", "leadingZeros", "__leadingZeros", "trailingZeros", "__trailingZeros"}:
+        if name in {
+            "countOnes",
+            "__countOnes",
+            "leadingZeros",
+            "__leadingZeros",
+            "trailingZeros",
+            "__trailingZeros",
+            "popcnt",
+            "__popcnt",
+            "clz",
+            "__clz",
+            "ctz",
+            "__ctz",
+        }:
             if len(args) != 1:
                 raise ComptimeError(_diag(self.filename, node.line, node.col, f"{name} expects 1 argument"))
             ty = self._expr_type_hint(arg_nodes[0], env, env_types) or "Int"
@@ -117,9 +130,9 @@ class _Evaluator:
             bits, _ = _int_props(ty)
             v = int(args[0]) & ((1 << bits) - 1)
             base = name[2:] if name.startswith("__") else name
-            if base == "countOnes":
+            if base in {"countOnes", "popcnt"}:
                 return v.bit_count()
-            if base == "leadingZeros":
+            if base in {"leadingZeros", "clz"}:
                 return bits if v == 0 else max(0, bits - v.bit_length())
             if v == 0:
                 return bits
@@ -128,6 +141,27 @@ class _Evaluator:
                 v >>= 1
                 c += 1
             return c
+        if name in {"rotl", "__rotl", "rotr", "__rotr"}:
+            if len(args) != 2:
+                raise ComptimeError(_diag(self.filename, node.line, node.col, f"{name} expects 2 arguments"))
+            ty = self._expr_type_hint(arg_nodes[0], env, env_types) or "Int"
+            if not _is_int_type_name(ty):
+                raise ComptimeError(_diag(self.filename, node.line, node.col, f"{name} expects integer arg 0, got {ty}"))
+            rhs_ty = self._expr_type_hint(arg_nodes[1], env, env_types) or "Int"
+            if not _is_int_type_name(rhs_ty):
+                raise ComptimeError(_diag(self.filename, node.line, node.col, f"{name} expects integer arg 1, got {rhs_ty}"))
+            bits, signed = _int_props(ty)
+            mask = (1 << bits) - 1
+            x = int(args[0]) & mask
+            n = int(args[1]) % bits
+            base = name[2:] if name.startswith("__") else name
+            if base == "rotl":
+                out = ((x << n) | (x >> ((bits - n) % bits))) & mask
+            else:
+                out = ((x >> n) | (x << ((bits - n) % bits))) & mask
+            if signed and out >= (1 << (bits - 1)):
+                out -= (1 << bits)
+            return out
         if name == "alloc":
             if len(args) != 1:
                 raise ComptimeError(_diag(self.filename, node.line, node.col, "alloc expects 1 argument"))
@@ -252,7 +286,7 @@ class _Evaluator:
                 return "Int"
             if isinstance(expr.value, float):
                 return "Float"
-            return "&str"
+            return "String"
         if isinstance(expr, Name):
             if expr.value in env_types:
                 return canonical_type(env_types[expr.value])

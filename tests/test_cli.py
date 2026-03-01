@@ -125,3 +125,41 @@ def test_cli_selfhost_is_honestly_labeled_unavailable():
     )
     assert proc.returncode != 0
     assert "selfhost-unavailable" in proc.stderr
+
+
+def test_cli_check_stdin_json_reports_stable_codes():
+    proc = subprocess.run(
+        [sys.executable, "-m", "astra.cli", "check", "--stdin", "--stdin-filename", "<mem>", "--json"],
+        input='fn main() -> Int { return "x"; }',
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode != 0
+    assert '"code": "ASTRA-TYPE-0001"' in proc.stdout
+
+
+def test_cli_check_files_mode_reports_errors(tmp_path: Path):
+    ok = tmp_path / "ok.astra"
+    bad = tmp_path / "bad.astra"
+    ok.write_text("fn main() -> Int { return 0; }")
+    bad.write_text('fn main() -> Int { return "x"; }')
+    proc = subprocess.run(
+        [sys.executable, "-m", "astra.cli", "check", "--files", str(ok), str(bad)],
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode != 0
+    assert "ASTRA-TYPE-0001" in proc.stderr
+
+
+def test_cli_fmt_and_doc_subcommands(tmp_path: Path):
+    src = tmp_path / "a.astra"
+    out = tmp_path / "api.md"
+    src.write_text("fn main() -> Int {\nprint(1);\nreturn 0;\n}\n")
+    rc_fmt = subprocess.call([sys.executable, "-m", "astra.cli", "fmt", str(src)])
+    assert rc_fmt == 0
+    rc_fmt_check = subprocess.call([sys.executable, "-m", "astra.cli", "fmt", str(src), "--check"])
+    assert rc_fmt_check == 0
+    rc_doc = subprocess.call([sys.executable, "-m", "astra.cli", "doc", str(src), "-o", str(out)])
+    assert rc_doc == 0
+    assert out.exists()

@@ -37,7 +37,7 @@ def test_hosted_stdlib_modules_are_rejected_in_freestanding_mode():
 
 def test_extended_stdlib_exports_exist():
     checks = {
-        "stdlib/core.astra": {"Option", "Result", "Vec", "Bytes"},
+        "stdlib/core.astra": {"Option", "Result", "Bytes", "add_checked", "sub_checked", "mul_checked", "div_checked"},
         "stdlib/time.astra": {"now_ms", "sleep_seconds"},
         "stdlib/io.astra": {"read_or"},
         "stdlib/collections.astra": {"map_get_or"},

@@ -5,7 +5,7 @@ This book describes the current user-facing Astra syntax in this repository.
 ## 1. Top-level declarations
 
 ```astra
-import stdlib::io as io;
+import std.io as io;
 
 type UserId = Int;
 
@@ -29,7 +29,6 @@ enum Result<T, E> {
   Err(E),
 }
 
-pub struct Vec<T> {}
 type Bytes = Vec<u8>;
 
 unsafe extern "libc.so.6" fn c_abs(x: Int) -> Int;
@@ -43,6 +42,8 @@ Notes:
 - Canonical typed form is `name: Type`.
 - Params/fields still accept legacy `name Type`.
 - `@packed` is currently supported only on `struct` declarations.
+- `Vec<T>` is a built-in owned growable buffer type used by `Bytes = Vec<u8>`.
+- Legacy module separator `::` is still accepted (`import stdlib::io as io;`).
 
 ## 2. Functions and types
 

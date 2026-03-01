@@ -11,7 +11,9 @@ def _parse_prefixed_width(text: str) -> tuple[bool, int] | None:
     if prefix not in {"i", "u"}:
         return None
     digits = text[1:]
-    if not digits.isdigit():
+    # Restrict to ASCII decimal digits so Unicode numerals (e.g. ²) do not
+    # pass `isdigit()` and later crash `int(...)`.
+    if not digits.isascii() or not digits.isdigit():
         return None
     if digits.startswith("0"):
         return None

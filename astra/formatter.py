@@ -177,7 +177,9 @@ def _fmt_stmt(st, ind: int) -> list[str]:
 def _fmt_item(item) -> list[str]:
     if isinstance(item, ImportDecl):
         alias = f" as {item.alias}" if item.alias else ""
-        return [f"import {'::'.join(item.path)}{alias};"]
+        if item.source is not None:
+            return [f'import "{item.source}"{alias};']
+        return [f"import {'.'.join(item.path)}{alias};"]
     if isinstance(item, TypeAliasDecl):
         return [f"type {item.name} = {type_text(item.target)};"]
     if isinstance(item, StructDecl):

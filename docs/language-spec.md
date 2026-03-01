@@ -6,6 +6,8 @@ Grammar (EBNF):
 
 ```
 program   = { import_decl | type_decl | struct_decl | enum_decl | extern_fn | fn_decl | impl_fn } ;
+import_decl = "import" (module_path | string) ["as" ident] [";"] ;
+module_path = ident { ("." | "::") ident } ;
 fn_decl   = ["pub"] ["async"] "fn" ident ["<" ident {"," ident} ">"] "(" [param {"," param}] [","] ")" "->" type block ;
 impl_fn   = ["pub"] "impl" ["async"] "fn" ident ["<" ident {"," ident} ">"] "(" [param {"," param}] [","] ")" "->" type block ;
 extern_fn = ["unsafe"] "extern" string "fn" ident "(" [param {"," param}] ")" "->" type ";" ;
@@ -91,6 +93,11 @@ Conventions:
 - Nominal primitive types: `Int`, `Float`, `Bool`, `Any`, `Void`, `Never`.
 - Integer families: `iN`/`uN` where `N` is in `1..128`, plus `isize`/`usize` aliases.
 - Integer literals may carry width suffixes (for example `15u4`, `3i7`).
+- Integer literals support decimal/hex/binary forms and `_` separators:
+  - decimal: `1_000_000`
+  - hex: `0xFF`, `0xffff_ffff`
+  - binary: `0b1010_0101`
+  - typed suffixes: `123u32`, `-1i64`
 - Signed `i1` is rejected in semantic analysis with a hint suggesting `u1`.
 - Invalid widths like `i0` or `u65536` are lexer errors.
 - Built-in generic sums: `Option<T>` and `Result<T, E>`.
@@ -107,15 +114,20 @@ Conventions:
   - `maxVal(T)`/`minVal(T)` return integer bounds for integer type `T`.
 - Width-aware integer bit intrinsics:
   - `countOnes(x)`, `leadingZeros(x)`, `trailingZeros(x)`.
+  - aliases: `popcnt(x)`, `clz(x)`, `ctz(x)`.
+  - rotate helpers: `rotl(x, n)`, `rotr(x, n)` (rotation count is modulo bit width).
 - `Option<T>` models absence/presence; `Result<T, E>` models recoverable failures with error information.
 - `Never` is coercible to any type `T` (including `Void`).
 - In type joins, `Never` acts as bottom: `join(Never, T) = T` and `join(Never, Never) = Never`.
 - `Any` is a tagged dynamic value on native/LLVM backends.
 - Implicit conversion is one-way (`T -> Any`); `Any -> T` requires explicit cast (`as T`).
 - Casting between `Any` and reference/function-pointer types requires `unsafe` context.
-- Bare expression statements must have type `Void` or `Never`.
-- `drop expr;` consumes the value and runs its destructor immediately.
-- Use `let _ = expr;` (or `_ = expr;`) to ignore/discard expression results.
+- JSON conversion for `Any` is shape-stable:
+  - objects roundtrip as map values
+  - arrays roundtrip as list values
+  - scalar JSON values roundtrip as scalar `Any` tags
+- Expression statements may discard values of any type.
+- `drop expr;` remains accepted for explicit consumption/destruction-style flows (legacy-compatible syntax).
 - `return;` is valid only in functions returning `Void`.
 - Unsized rules:
   - `str` is unsized; use behind references/pointers (for now typically `&str`).
@@ -132,7 +144,8 @@ Conventions:
   - Copy-by-default set is currently scalar numerics, `Float`, `Bool`, and shared references (`&T`).
   - Other values are move-only unless later declared copyable.
 - String literal model:
-  - String literals conceptually type as `&'static str` (lifetime syntax currently elided in source).
+  - String literals type as owned `String` values.
+  - `String + String` returns `String`.
 - Indexing rules:
   - `Vec<T>`, `Bytes`, and slice views index with `Int` and yield `T` (or `u8` for `Bytes`).
   - `index` operations are bounds-checked and trap/panic on out-of-bounds in safe code.
@@ -156,6 +169,20 @@ Conventions:
 - File module = one `.astra` file.
 - Package root is directory with `Astra.toml`.
 - Dependency lockfile `Astra.lock` provides reproducible resolution.
+- Import forms:
+  - module import: `import std.io;` (preferred) or `import stdlib::io;` (legacy)
+  - string/path import: `import "relative/path";`
+- Module import resolution:
+  - `std.*` / `stdlib::*` resolve from stdlib root
+  - other module paths resolve from nearest package root (`Astra.toml`) when present
+  - if no package root is found, module paths resolve relative to importing file directory
+- String/path import resolution:
+  - absolute paths resolve as-is
+  - relative paths resolve from the importing file directory
+- Stdlib root lookup order:
+  - `ASTRA_STDLIB_PATH` environment override
+  - repository `stdlib/` (dev checkout)
+  - bundled package path (`astra/stdlib`)
 
 ## Error handling
 - Recoverable errors returned as result values.
@@ -178,4 +205,5 @@ Conventions:
 - `free(ptr)` releases a previously allocated handle.
 - `spawn(fn, ...)` starts `fn` on a runtime thread and returns an integer task id.
 - `join(task_id)` blocks until the task completes and returns its result.
-- `countOnes(x)`, `leadingZeros(x)`, `trailingZeros(x)` require integer arguments.
+- `countOnes(x)`, `leadingZeros(x)`, `trailingZeros(x)` (and aliases `popcnt`, `clz`, `ctz`) require integer arguments.
+- `rotl(x, n)` and `rotr(x, n)` rotate integer bit patterns with modulo-width counts.

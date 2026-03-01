@@ -86,6 +86,37 @@ def _advance_pos(text: str, line: int, col: int) -> tuple[int, int]:
     return line, col
 
 
+def _scan_digits_with_separators(src: str, i: int, *, base: int) -> tuple[int, bool]:
+    j = i
+    saw_digit = False
+    saw_invalid_sep = False
+    prev_sep = False
+    while j < len(src):
+        ch = src[j]
+        if ch == "_":
+            if not saw_digit or prev_sep:
+                saw_invalid_sep = True
+            prev_sep = True
+            j += 1
+            continue
+        if base == 2:
+            is_digit = ch in {"0", "1"}
+        elif base == 10:
+            is_digit = ch.isdigit()
+        elif base == 16:
+            is_digit = ch.isdigit() or ch.lower() in {"a", "b", "c", "d", "e", "f"}
+        else:
+            is_digit = False
+        if not is_digit:
+            break
+        saw_digit = True
+        prev_sep = False
+        j += 1
+    if prev_sep:
+        saw_invalid_sep = True
+    return j, saw_digit and not saw_invalid_sep
+
+
 def lex(src: str, filename: str = "<input>") -> list[Token]:
     out: list[Token] = []
     i = 0
@@ -190,17 +221,29 @@ def lex(src: str, filename: str = "<input>") -> list[Token]:
 
         if ch.isdigit() or (ch == "." and i + 1 < len(src) and src[i + 1].isdigit()):
             j = i
-            has_dot = False
-            while j < len(src) and src[j].isdigit():
+            kind = "INT"
+            valid = True
+            if ch == ".":
+                kind = "FLOAT"
                 j += 1
-            if j < len(src) and src[j] == "." and not src.startswith("..", j):
-                has_dot = True
-                j += 1
-                while j < len(src) and src[j].isdigit():
+                j, valid = _scan_digits_with_separators(src, j, base=10)
+            elif ch == "0" and i + 1 < len(src) and src[i + 1] in {"x", "X", "b", "B"}:
+                base_ch = src[i + 1].lower()
+                base = 16 if base_ch == "x" else 2
+                j = i + 2
+                j, valid = _scan_digits_with_separators(src, j, base=base)
+            else:
+                j, valid = _scan_digits_with_separators(src, j, base=10)
+                if j < len(src) and src[j] == "." and not src.startswith("..", j):
+                    kind = "FLOAT"
                     j += 1
+                    j, frac_valid = _scan_digits_with_separators(src, j, base=10)
+                    valid = valid and frac_valid
             text = src[i:j]
-            kind = "FLOAT" if has_dot else "INT"
-            out.append(Token(kind, text, start_i, start_line, start_col))
+            if valid:
+                out.append(Token(kind, text, start_i, start_line, start_col))
+            else:
+                out.append(Token("ERROR", f"invalid numeric literal {text}", start_i, start_line, start_col))
             line, col = _advance_pos(text, line, col)
             i = j
             continue

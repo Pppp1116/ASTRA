@@ -175,6 +175,7 @@ def to_python(prog: Program, freestanding: bool = False, overflow_mode: str = "t
         "def now_unix(): return int(time.time())",
         "def monotonic_ms(): return int(time.monotonic() * 1000)",
         "def sleep_ms(ms): time.sleep(max(0, int(ms)) / 1000.0); return 0",
+        "def astra_str_concat(a, b): return str(a) + str(b)",
         "def countOnes(x, bits=64):",
         "    width = max(1, int(bits))",
         "    v = int(x) & ((1 << width) - 1)",
@@ -193,6 +194,21 @@ def to_python(prog: Program, freestanding: bool = False, overflow_mode: str = "t
         "        v >>= 1",
         "        tz += 1",
         "    return tz",
+        "def popcnt(x, bits=64): return countOnes(x, bits)",
+        "def clz(x, bits=64): return leadingZeros(x, bits)",
+        "def ctz(x, bits=64): return trailingZeros(x, bits)",
+        "def rotl(x, n, bits=64):",
+        "    width = max(1, int(bits))",
+        "    mask = (1 << width) - 1",
+        "    v = int(x) & mask",
+        "    k = int(n) % width",
+        "    return ((v << k) | (v >> ((width - k) % width))) & mask",
+        "def rotr(x, n, bits=64):",
+        "    width = max(1, int(bits))",
+        "    mask = (1 << width) - 1",
+        "    v = int(x) & mask",
+        "    k = int(n) % width",
+        "    return ((v >> k) | (v << ((width - k) % width))) & mask",
         "def __list_new(): return list_new()",
         "def __list_push(xs, v): return list_push(xs, v)",
         "def __list_get(xs, i): return list_get(xs, i)",
@@ -228,6 +244,11 @@ def to_python(prog: Program, freestanding: bool = False, overflow_mode: str = "t
         "def __countOnes(x, bits=64): return countOnes(x, bits)",
         "def __leadingZeros(x, bits=64): return leadingZeros(x, bits)",
         "def __trailingZeros(x, bits=64): return trailingZeros(x, bits)",
+        "def __popcnt(x, bits=64): return popcnt(x, bits)",
+        "def __clz(x, bits=64): return clz(x, bits)",
+        "def __ctz(x, bits=64): return ctz(x, bits)",
+        "def __rotl(x, n, bits=64): return rotl(x, n, bits)",
+        "def __rotr(x, n, bits=64): return rotr(x, n, bits)",
         "def _astra_load_lib(name):",
         "    if name not in _astra_libs:",
         "        _astra_libs[name] = ctypes.CDLL(name)",
@@ -355,6 +376,15 @@ def _known_py_int_bits(e: Any) -> int:
     return 64
 
 
+def _is_text_expr(e: Any) -> bool:
+    if isinstance(e, Literal) and isinstance(e.value, str):
+        return True
+    inferred = getattr(e, "inferred_type", None)
+    if not isinstance(inferred, str):
+        return False
+    return _canonical_type(inferred) in {"String", "str", "&str"}
+
+
 def _expr(e: Any) -> str:
     if isinstance(e, BoolLit):
         return "True" if e.value else "False"
@@ -426,13 +456,31 @@ def _expr(e: Any) -> str:
     if isinstance(e, Binary):
         if e.op == "??":
             return f"((lambda __v: __v if __v is not None else {_expr(e.right)})({_expr(e.left)}))"
+        if e.op == "+" and _is_text_expr(e.left) and _is_text_expr(e.right):
+            return f"astra_str_concat({_expr(e.left)}, {_expr(e.right)})"
         op = BIN_OP_MAP.get(e.op, e.op)
         return f"({_expr(e.left)} {op} {_expr(e.right)})"
     if isinstance(e, Call):
         name = e.resolved_name or _call_name(e.fn)
-        if name in {"countOnes", "__countOnes", "leadingZeros", "__leadingZeros", "trailingZeros", "__trailingZeros"} and len(e.args) == 1:
+        if name in {
+            "countOnes",
+            "__countOnes",
+            "leadingZeros",
+            "__leadingZeros",
+            "trailingZeros",
+            "__trailingZeros",
+            "popcnt",
+            "__popcnt",
+            "clz",
+            "__clz",
+            "ctz",
+            "__ctz",
+        } and len(e.args) == 1:
             bits = _known_py_int_bits(e.args[0])
             return f"{name}({_expr(e.args[0])}, {bits})"
+        if name in {"rotl", "__rotl", "rotr", "__rotr"} and len(e.args) == 2:
+            bits = _known_py_int_bits(e.args[0])
+            return f"{name}({_expr(e.args[0])}, {_expr(e.args[1])}, {bits})"
         name = {"print": "print_", "len": "len_"}.get(name, name)
         return f"{name}({', '.join(_expr(a) for a in e.args)})"
     if isinstance(e, IndexExpr):

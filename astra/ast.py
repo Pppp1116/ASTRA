@@ -124,6 +124,7 @@ class ImportDecl:
     pos: int = 0
     line: int = 0
     col: int = 0
+    source: str | None = None
 
 
 @dataclass

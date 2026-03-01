@@ -2,6 +2,24 @@ from astra.parser import parse
 from astra.semantic import SemanticError, analyze
 
 
+def test_string_import_resolves_relative_module_file(tmp_path):
+    dep = tmp_path / "dep.astra"
+    dep.write_text("fn helper() -> Int { return 1; }")
+    src = tmp_path / "main.astra"
+    src.write_text('import "dep"; fn main() -> Int { return 0; }')
+    analyze(parse(src.read_text(), filename=str(src)), filename=str(src))
+
+
+def test_module_import_resolves_from_package_root(tmp_path):
+    (tmp_path / "Astra.toml").write_text('name = "app"\n')
+    (tmp_path / "lib").mkdir()
+    (tmp_path / "src").mkdir()
+    (tmp_path / "lib" / "util.astra").write_text("fn helper() -> Int { return 1; }")
+    src = tmp_path / "src" / "main.astra"
+    src.write_text("import lib.util; fn main() -> Int { return 0; }")
+    analyze(parse(src.read_text(), filename=str(src)), filename=str(src))
+
+
 def test_struct_constructor_and_field_types_ok():
     src = """
 struct Point { x Int, y Int }
@@ -93,6 +111,11 @@ def test_none_allowed_with_explicit_option_type():
     analyze(parse(src))
 
 
+def test_option_type_accepts_plain_inner_value_as_some():
+    src = "fn main() -> Int { let x: Option<Int> = 7; return x ?? 0; }"
+    analyze(parse(src))
+
+
 def test_coalesce_requires_option_left_operand():
     src = "fn main() -> Int { let x = 2 ?? 4; return x; }"
     try:
@@ -107,13 +130,9 @@ def test_type_sugar_question_mark_desugars_to_option():
     analyze(parse(src))
 
 
-def test_expression_statement_requires_void_or_never():
+def test_expression_statement_allows_discarding_non_void_values():
     src = "fn id(x Int) -> Int { return x; } fn main() -> Int { id(1); return 0; }"
-    try:
-        analyze(parse(src))
-        assert False
-    except SemanticError as e:
-        assert "expression statement must be Void or Never" in str(e)
+    analyze(parse(src))
 
 
 def test_drop_statement_allows_discarding_values():
@@ -252,6 +271,11 @@ def test_string_indexing_is_rejected():
         assert "cannot index UTF-8 text directly" in str(e)
 
 
+def test_string_concatenation_accepts_literals_and_strings():
+    src = 'fn main() -> Int { let s = "a" + "b"; let t: String = s + "c"; return len(t); }'
+    analyze(parse(src))
+
+
 def test_str_indexing_is_rejected():
     src = 'fn first(s: &str) -> Int { return s[0]; } fn main() -> Int { return 0; }'
     try:
@@ -286,6 +310,11 @@ def test_mixed_int_float_arithmetic_requires_explicit_cast():
         assert False
     except SemanticError as e:
         assert "requires explicit cast" in str(e)
+
+
+def test_cast_bool_to_int_is_allowed():
+    src = "fn main() -> Int { let b = true; return b as Int; }"
+    analyze(parse(src))
 
 
 def test_strict_integer_binary_requires_matching_types():
@@ -352,6 +381,21 @@ fn main() -> Int {
     analyze(parse(src))
 
 
+def test_semantic_supports_popcnt_clz_ctz_aliases_and_rotates():
+    src = """
+fn main() -> Int {
+  let x: u8 = 0b1001_0001u8;
+  let a = popcnt(x);
+  let b = clz(x);
+  let c = ctz(x);
+  let d: u8 = rotl(x, 1u8);
+  let e: u8 = rotr(d, 1u8);
+  return a + b + c + (e as Int);
+}
+"""
+    analyze(parse(src))
+
+
 def test_semantic_rejects_static_shift_count_out_of_range():
     src = "fn main() -> Int { let x: u8 = 1 as u8; return (x << (8 as u8)) as Int; }"
     try:
@@ -377,6 +421,15 @@ def test_semantic_rejects_bit_intrinsics_on_non_integer_type():
         assert False
     except SemanticError as e:
         assert "expects an integer argument" in str(e)
+
+
+def test_semantic_rejects_rotates_on_non_integer_types():
+    src = "fn main() -> Int { return rotl(1.5, 1) as Int; }"
+    try:
+        analyze(parse(src))
+        assert False
+    except SemanticError as e:
+        assert "expects integer arg 0" in str(e)
 
 
 def test_semantic_rejects_maxval_on_non_integer_type():

@@ -217,3 +217,31 @@ fn main() -> Int {
 """,
     )
     assert cp.returncode == 42
+
+
+def test_full_program_literals_alias_intrinsics_and_json_shapes(tmp_path: Path):
+    cp = _build_and_run(
+        tmp_path,
+        "literals_json",
+        """
+fn main() -> Int {
+  let a = 0x2A;
+  let x: u8 = 0b1010_0101u8;
+  let mut m = map_new();
+  map_set(m, "k", 1);
+  let xs = list_new();
+  list_push(xs, 4);
+  list_push(xs, 5);
+  map_set(m, "xs", xs);
+  let js = to_json(m);
+  let rt = from_json(js);
+  let got = map_get(rt, "k") as Int;
+  let ys = map_get(rt, "xs");
+  let y1 = list_get(ys, 1) as Int;
+  let s = "a" + "b";
+  let r: u8 = rotr(rotl(x, 1u8), 1u8);
+  return a + popcnt(x) + (r as Int) + got + y1 + len(s);
+}
+""",
+    )
+    assert cp.returncode == 219
