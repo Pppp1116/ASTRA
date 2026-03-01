@@ -1,5 +1,6 @@
 import hashlib
 import json
+import re
 import shutil
 import subprocess
 import tempfile
@@ -359,25 +360,60 @@ def _build_native_llvm(ir_text: str, out_path: str, src_file: Path, *, profile: 
     clang = shutil.which("clang")
     if clang is None:
         raise RuntimeError(f"CODEGEN {src_file}:1:1: native target requires `clang` in PATH")
-    runtime_c = Path(__file__).resolve().parent.parent / "runtime" / "llvm_runtime.c"
-    if not runtime_c.exists():
-        raise RuntimeError(f"CODEGEN {src_file}:1:1: missing runtime source at {runtime_c}")
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
     opt_flag = "-O3" if profile == "release" else "-O0"
     with tempfile.TemporaryDirectory(prefix="astra-native-") as td:
         ll_path = Path(td) / "module.ll"
         ll_path.write_text(ir_text)
-        cmd = [clang, opt_flag, str(ll_path), str(runtime_c), "-lm", "-o", str(out)]
+        if freestanding:
+            cmd = [
+                clang,
+                opt_flag,
+                str(ll_path),
+                "-nostdlib",
+                "-nostartfiles",
+                "-Wl,-e,_start",
+                "-o",
+                str(out),
+            ]
+        else:
+            runtime_c = Path(__file__).resolve().parent.parent / "runtime" / "llvm_runtime.c"
+            if not runtime_c.exists():
+                raise RuntimeError(f"CODEGEN {src_file}:1:1: missing runtime source at {runtime_c}")
+            cmd = [clang, opt_flag, str(ll_path), str(runtime_c), "-lm", "-o", str(out)]
         if triple:
             cmd.insert(1, f"--target={triple}")
-        if freestanding:
-            cmd.extend(["-nostartfiles", "-Wl,-e,_start"])
         cp = subprocess.run(cmd, capture_output=True, text=True)
         if cp.returncode != 0:
             detail = (cp.stderr or cp.stdout or "").strip()
             raise RuntimeError(f"CODEGEN {src_file}:1:1: clang link failed{': ' + detail if detail else ''}")
     out.chmod(out.stat().st_mode | 0o111)
+
+
+def _require_runtime_free_freestanding(ir_text: str, src_file: Path) -> None:
+    syms = sorted(
+        {
+            s
+            for s in re.findall(r"@((?:astra|__astra)_[A-Za-z0-9_]+)", ir_text)
+            if not s.startswith("__astra_fs_")
+        }
+    )
+    if syms:
+        raise RuntimeError(
+            f"CODEGEN {src_file}:1:1: freestanding build cannot depend on runtime symbols: {', '.join(syms)}"
+        )
+    externs = sorted(
+        {
+            name
+            for name in re.findall(r"(?m)^\s*declare\s+[^@]*@([A-Za-z_.$][A-Za-z0-9_.$]*)\(", ir_text)
+            if not name.startswith("llvm.")
+        }
+    )
+    if externs:
+        raise RuntimeError(
+            f"CODEGEN {src_file}:1:1: freestanding build cannot depend on external host symbols: {', '.join(externs)}"
+        )
 
 def build(
     src_path: str,
@@ -404,6 +440,10 @@ def build(
         return 'cached'
     src = src_file.read_text()
     prog = parse(src, filename=str(src_file))
+    if freestanding and target == "native":
+        has_start = any(isinstance(item, FnDecl) and item.name == "_start" for item in prog.items)
+        if not has_start:
+            raise RuntimeError(f"BUILD {src_file}:1:1: freestanding native target requires fn _start()")
     run_comptime(prog, filename=str(src_file), overflow_mode=overflow_mode)
     analyze(prog, filename=str(src_file), freestanding=freestanding)
     optimize_program(prog)
@@ -418,6 +458,8 @@ def build(
             triple=triple,
             profile=profile,
         )
+    if freestanding and llvm_ir is not None:
+        _require_runtime_free_freestanding(llvm_ir, src_file)
     if emit_ir:
         assert llvm_ir is not None
         p = Path(emit_ir)

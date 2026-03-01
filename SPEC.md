@@ -211,7 +211,11 @@ Common contract:
 
 `native` target:
 - Compiles/links emitted LLVM IR with `clang` plus portable runtime (`runtime/llvm_runtime.c`).
-- Freestanding/native modes are backend/toolchain-defined and may require explicit target-entry compatibility.
+- In `--freestanding` mode:
+  - hosted/runtime builtins are semantic errors
+  - emitted LLVM IR must not reference `astra_*` runtime symbols or non-LLVM external host symbols
+  - `native --freestanding` requires `fn _start()`
+  - vector operations are provided by runtime-free builtins: `vec_new`, `vec_from`, `vec_len`, `vec_get`, `vec_set`, `vec_push`
 
 Normative boundary rule:
 - If a program passes semantic analysis but fails only due to backend lowering limits, failure must be reported as backend-defined (`CODEGEN`) rather than semantic invalidity.

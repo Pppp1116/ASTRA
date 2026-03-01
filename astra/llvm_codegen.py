@@ -65,12 +65,16 @@ class _FnState:
 class _ModuleCtx:
     module: ir.Module
     triple: str
+    freestanding: bool
     structs: dict[str, _StructInfo]
     struct_decls: dict[str, StructDecl]
     slice_header_ty: ir.LiteralStructType
     fn_sigs: dict[str, _FnSig]
     fn_map: dict[str, ir.Function]
     string_globals: dict[str, ir.GlobalVariable]
+
+
+_FREESTANDING_HEAP_BYTES = 8 * 1024 * 1024
 
 
 def _diag(node: Any, msg: str) -> str:
@@ -516,6 +520,12 @@ def _expr_type(state: _FnState, e: Any) -> str:
                 return "usize"
             if name in {"countOnes", "leadingZeros", "trailingZeros", "__countOnes", "__leadingZeros", "__trailingZeros"}:
                 return "Int"
+            if name in {"vec_new", "__vec_new", "vec_from", "__vec_from"}:
+                return "Any"
+            if name in {"vec_len", "__vec_len", "vec_set", "__vec_set", "vec_push", "__vec_push"}:
+                return "Int"
+            if name in {"vec_get", "__vec_get"}:
+                return "Option<Any>"
         return "Int"
     if isinstance(e, FieldExpr):
         obj_ty = _expr_type(state, e.obj)
@@ -668,6 +678,78 @@ def _declare_trap(ctx: _ModuleCtx) -> ir.Function:
     return fn
 
 
+def _declare_memcpy(ctx: _ModuleCtx) -> ir.Function:
+    name = "llvm.memcpy.p0.p0.i64"
+    fn = ctx.fn_map.get(name)
+    if isinstance(fn, ir.Function):
+        return fn
+    i8p = ir.IntType(8).as_pointer()
+    i64 = ir.IntType(64)
+    i1 = ir.IntType(1)
+    fn = ir.Function(ctx.module, ir.FunctionType(ir.VoidType(), [i8p, i8p, i64, i1]), name=name)
+    ctx.fn_map[name] = fn
+    return fn
+
+
+def _ensure_freestanding_heap(ctx: _ModuleCtx) -> tuple[ir.GlobalVariable, ir.GlobalVariable]:
+    heap_name = "__astra_fs_heap"
+    off_name = "__astra_fs_heap_off"
+    try:
+        heap = ctx.module.get_global(heap_name)
+    except KeyError:
+        heap_ty = ir.ArrayType(ir.IntType(8), _FREESTANDING_HEAP_BYTES)
+        heap = ir.GlobalVariable(ctx.module, heap_ty, name=heap_name)
+        heap.linkage = "internal"
+        heap.initializer = ir.Constant(heap_ty, None)
+    try:
+        off = ctx.module.get_global(off_name)
+    except KeyError:
+        off_ty = ir.IntType(64)
+        off = ir.GlobalVariable(ctx.module, off_ty, name=off_name)
+        off.linkage = "internal"
+        off.initializer = ir.Constant(off_ty, 0)
+    return heap, off
+
+
+def _alloc_bytes(ctx: _ModuleCtx, state: _FnState, size_i64: ir.Value, align_i64: ir.Value, node: Any) -> ir.Value:
+    b = state.builder
+    i64 = ir.IntType(64)
+    i8p = ir.IntType(8).as_pointer()
+    if not ctx.freestanding:
+        alloc_fn = _declare_runtime(ctx, "astra_alloc")
+        raw = b.call(alloc_fn, [size_i64, align_i64])
+        return b.inttoptr(raw, i8p)
+
+    heap, off = _ensure_freestanding_heap(ctx)
+    zero = ir.Constant(i64, 0)
+    one = ir.Constant(i64, 1)
+    old_off = b.load(off)
+    align_nz = b.select(b.icmp_unsigned("==", align_i64, zero), one, align_i64)
+    mask = b.sub(align_nz, one)
+    plus = b.add(old_off, mask)
+    inv_mask = b.xor(mask, ir.Constant(i64, -1))
+    aligned_off = b.and_(plus, inv_mask)
+    new_off = b.add(aligned_off, size_i64)
+    ok = b.icmp_unsigned("<=", new_off, ir.Constant(i64, _FREESTANDING_HEAP_BYTES))
+
+    fn = state.fn_ir
+    ok_block = fn.append_basic_block("fs_alloc_ok")
+    oom_block = fn.append_basic_block("fs_alloc_oom")
+    b.cbranch(ok, ok_block, oom_block)
+
+    b.position_at_end(oom_block)
+    trap = _declare_trap(ctx)
+    b.call(trap, [])
+    b.unreachable()
+
+    b.position_at_end(ok_block)
+    b.store(new_off, off)
+    ptr = b.gep(heap, [zero, aligned_off], inbounds=True)
+    if ptr.type != i8p:
+        ptr = b.bitcast(ptr, i8p)
+    return ptr
+
+
 def _as_i8_ptr(state: _FnState, v: ir.Value, node: Any) -> ir.Value:
     i8p = ir.IntType(8).as_pointer()
     if isinstance(v.type, ir.PointerType):
@@ -780,6 +862,126 @@ def _compile_builtin_call(ctx: _ModuleCtx, state: _FnState, call: Call, name: st
 
     def _as_any_i64(v: _Value, node: Any) -> ir.Value:
         return _coerce_value(ctx, state, v.value, v.ty, "Int", node)
+
+    if base == "vec_new":
+        if len(call.args) != 0:
+            raise CodegenError(_diag(call, "vec_new expects 0 arguments"))
+        header_i8 = _alloc_bytes(ctx, state, ir.Constant(i64, 16), ir.Constant(i64, 8), call)
+        header_ptr = b.bitcast(header_i8, ctx.slice_header_ty.as_pointer())
+        len_ptr = b.gep(header_ptr, [ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), 0)], inbounds=True)
+        data_ptr = b.gep(header_ptr, [ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), 1)], inbounds=True)
+        b.store(ir.Constant(i64, 0), len_ptr)
+        b.store(ir.Constant(i8p, None), data_ptr)
+        out_ty = _expr_type(state, call)
+        return _Value(header_i8, out_ty if _is_vec_type(out_ty) else "Any")
+
+    if base == "vec_from":
+        if len(call.args) != 1:
+            raise CodegenError(_diag(call, "vec_from expects 1 argument"))
+        src = _compile_expr(ctx, state, call.args[0], overflow_mode=overflow_mode)
+        src_ty = _canonical_type(src.ty)
+        if _is_vec_type(src_ty):
+            return _Value(_as_i8_ptr(state, src.value, call), src_ty)
+        if _is_slice_type(src_ty):
+            return _Value(_as_i8_ptr(state, src.value, call), f"Vec<{_slice_inner_type(src_ty)}>")
+        raise CodegenError(_diag(call, f"vec_from expects [T] or Vec<T>, got {src.ty}"))
+
+    if base in {"vec_len", "vec_get", "vec_set", "vec_push"}:
+        if len(call.args) < 1:
+            raise CodegenError(_diag(call, f"{base} expects at least 1 argument"))
+        vec = _compile_expr(ctx, state, call.args[0], overflow_mode=overflow_mode)
+        vec_ty = _canonical_type(vec.ty)
+        if not _is_vec_type(vec_ty):
+            raise CodegenError(_diag(call, f"{base} expects Vec<T>, got {vec.ty}"))
+        elem_ty = _vec_inner_type(vec_ty)
+        vec_i8 = _as_i8_ptr(state, vec.value, call.args[0])
+        hdr_ptr = b.bitcast(vec_i8, ctx.slice_header_ty.as_pointer())
+        len_ptr = b.gep(hdr_ptr, [ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), 0)], inbounds=True)
+        data_ptr = b.gep(hdr_ptr, [ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), 1)], inbounds=True)
+        ln = b.load(len_ptr)
+
+        if base == "vec_len":
+            if len(call.args) != 1:
+                raise CodegenError(_diag(call, "vec_len expects 1 argument"))
+            return _Value(ln, "Int")
+
+        idx = _compile_expr(ctx, state, call.args[1], overflow_mode=overflow_mode)
+        idx64 = _coerce_value(ctx, state, idx.value, idx.ty, "Int", call.args[1])
+        elem_ll = _llvm_type(ctx, elem_ty)
+        data_i8 = b.load(data_ptr)
+        typed_data = b.bitcast(data_i8, elem_ll.as_pointer())
+
+        if base == "vec_get":
+            if len(call.args) != 2:
+                raise CodegenError(_diag(call, "vec_get expects 2 arguments"))
+            zero = ir.Constant(ir.IntType(64), 0)
+            nonneg = b.icmp_signed(">=", idx64, zero)
+            lt = b.icmp_signed("<", idx64, ln)
+            in_bounds = b.and_(nonneg, lt)
+            some_block = state.fn_ir.append_basic_block("vec_get_some")
+            none_block = state.fn_ir.append_basic_block("vec_get_none")
+            end_block = state.fn_ir.append_basic_block("vec_get_end")
+            b.cbranch(in_bounds, some_block, none_block)
+
+            b.position_at_end(some_block)
+            elem_ptr = b.gep(typed_data, [idx64], inbounds=True)
+            some_val = _as_i8_ptr(state, elem_ptr, call)
+            b.branch(end_block)
+            some_block = b.block
+
+            b.position_at_end(none_block)
+            b.branch(end_block)
+            none_block = b.block
+
+            b.position_at_end(end_block)
+            out = b.phi(ir.IntType(8).as_pointer())
+            out.add_incoming(some_val, some_block)
+            out.add_incoming(ir.Constant(ir.IntType(8).as_pointer(), None), none_block)
+            return _Value(out, f"Option<{elem_ty}>")
+
+        if base == "vec_set":
+            if len(call.args) != 3:
+                raise CodegenError(_diag(call, "vec_set expects 3 arguments"))
+            _emit_oob_trap(ctx, state, idx64, ln)
+            elem_ptr = b.gep(typed_data, [idx64], inbounds=True)
+            val = _compile_expr(ctx, state, call.args[2], overflow_mode=overflow_mode)
+            vv = _coerce_value(ctx, state, val.value, val.ty, elem_ty, call.args[2])
+            b.store(vv, elem_ptr)
+            return _Value(ir.Constant(i64, 0), "Int")
+
+        if base == "vec_push":
+            if len(call.args) != 2:
+                raise CodegenError(_diag(call, "vec_push expects 2 arguments"))
+            elem_sz, elem_align = _storage_size_align(ctx, elem_ty, call)
+            new_ln = b.add(ln, ir.Constant(i64, 1))
+            new_bytes = b.mul(new_ln, ir.Constant(i64, elem_sz))
+            new_data_i8 = _alloc_bytes(ctx, state, new_bytes, ir.Constant(i64, elem_align), call)
+
+            zero = ir.Constant(i64, 0)
+            has_old = b.icmp_unsigned(">", ln, zero)
+            copy_block = state.fn_ir.append_basic_block("vec_push_copy")
+            nocopy_block = state.fn_ir.append_basic_block("vec_push_nocopy")
+            cont_block = state.fn_ir.append_basic_block("vec_push_cont")
+            b.cbranch(has_old, copy_block, nocopy_block)
+
+            b.position_at_end(copy_block)
+            old_bytes = b.mul(ln, ir.Constant(i64, elem_sz))
+            memcpy = _declare_memcpy(ctx)
+            b.call(memcpy, [new_data_i8, data_i8, old_bytes, ir.Constant(ir.IntType(1), 0)])
+            b.branch(cont_block)
+
+            b.position_at_end(nocopy_block)
+            b.branch(cont_block)
+
+            b.position_at_end(cont_block)
+            new_typed = b.bitcast(new_data_i8, elem_ll.as_pointer())
+            tail_ptr = b.gep(new_typed, [ln], inbounds=True)
+            val = _compile_expr(ctx, state, call.args[1], overflow_mode=overflow_mode)
+            vv = _coerce_value(ctx, state, val.value, val.ty, elem_ty, call.args[1])
+            b.store(vv, tail_ptr)
+            b.store(new_ln, len_ptr)
+            b.store(new_data_i8, data_ptr)
+            return _Value(ir.Constant(i64, 0), "Int")
 
     if base == "print":
         if len(call.args) != 1:
@@ -1185,9 +1387,13 @@ def _compile_call(ctx: _ModuleCtx, state: _FnState, call: Call, overflow_mode: s
             if len(call.args) != len(sinfo.field_types):
                 raise CodegenError(_diag(call, f"struct {name} expects {len(sinfo.field_types)} args, got {len(call.args)}"))
             size, align = _storage_size_align(ctx, name, call)
-            alloc_fn = _declare_runtime(ctx, "astra_alloc")
-            raw = state.builder.call(alloc_fn, [ir.Constant(ir.IntType(64), size), ir.Constant(ir.IntType(64), align)])
-            ptr_i8 = state.builder.inttoptr(raw, ir.IntType(8).as_pointer())
+            ptr_i8 = _alloc_bytes(
+                ctx,
+                state,
+                ir.Constant(ir.IntType(64), size),
+                ir.Constant(ir.IntType(64), align),
+                call,
+            )
             ptr = state.builder.bitcast(ptr_i8, sinfo.ty.as_pointer())
             for i, ((fname, _), arg, fty) in enumerate(zip(sinfo.decl.fields, call.args, sinfo.field_types)):
                 a = _compile_expr(ctx, state, arg)
@@ -1240,6 +1446,12 @@ def _compile_call(ctx: _ModuleCtx, state: _FnState, call: Call, overflow_mode: s
             "countOnes",
             "leadingZeros",
             "trailingZeros",
+            "vec_new",
+            "vec_from",
+            "vec_len",
+            "vec_get",
+            "vec_set",
+            "vec_push",
             "__print",
             "__len",
             "__read_file",
@@ -1280,6 +1492,12 @@ def _compile_call(ctx: _ModuleCtx, state: _FnState, call: Call, overflow_mode: s
             "__countOnes",
             "__leadingZeros",
             "__trailingZeros",
+            "__vec_new",
+            "__vec_from",
+            "__vec_len",
+            "__vec_get",
+            "__vec_set",
+            "__vec_push",
             "panic",
             "__panic",
         }:
@@ -1486,8 +1704,7 @@ def _compile_expr(ctx: _ModuleCtx, state: _FnState, e: Any, overflow_mode: str =
             if e.op == "/":
                 return _Value(b.fdiv(lv, rv), ty)
             if e.op == "%":
-                fn = _declare_runtime(ctx, "astra_fmod")
-                return _Value(b.call(fn, [lv, rv]), ty)
+                return _Value(b.frem(lv, rv), ty)
             if e.op in {"==", "!=", "<", "<=", ">", ">="}:
                 pred = {
                     "==": "==",
@@ -1509,7 +1726,7 @@ def _compile_expr(ctx: _ModuleCtx, state: _FnState, e: Any, overflow_mode: str =
         lv = _coerce_value(ctx, state, left.value, left.ty, lty, e.left)
         rv = _coerce_value(ctx, state, right.value, right.ty, lty, e.right)
 
-        if bits == 128 and e.op in {"*", "/", "%"}:
+        if bits == 128 and e.op in {"*", "/", "%"} and not ctx.freestanding:
             sym = _i128_helper_symbol({"*": "mul", "/": "div", "%": "mod"}[e.op], signed, overflow_mode)
             fn = _declare_runtime(ctx, sym)
             out = b.call(fn, [lv, rv])
@@ -1653,11 +1870,9 @@ def _compile_expr(ctx: _ModuleCtx, state: _FnState, e: Any, overflow_mode: str =
             v = _compile_expr(ctx, state, el, overflow_mode=overflow_mode)
             vals.append(_coerce_value(ctx, state, v.value, v.ty, elem_ty, el))
 
-        alloc_fn = _declare_runtime(ctx, "astra_alloc")
         i64 = ir.IntType(64)
         i8p = ir.IntType(8).as_pointer()
-        header_raw = b.call(alloc_fn, [ir.Constant(i64, 16), ir.Constant(i64, 8)])
-        header_i8 = b.inttoptr(header_raw, i8p)
+        header_i8 = _alloc_bytes(ctx, state, ir.Constant(i64, 16), ir.Constant(i64, 8), e)
         header_ptr = b.bitcast(header_i8, ctx.slice_header_ty.as_pointer())
         len_ptr = b.gep(header_ptr, [ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), 0)], inbounds=True)
         data_ptr = b.gep(header_ptr, [ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), 1)], inbounds=True)
@@ -1665,8 +1880,7 @@ def _compile_expr(ctx: _ModuleCtx, state: _FnState, e: Any, overflow_mode: str =
         if vals:
             elem_sz, elem_align = _storage_size_align(ctx, elem_ty, e)
             total = elem_sz * len(vals)
-            raw = b.call(alloc_fn, [ir.Constant(i64, total), ir.Constant(i64, elem_align)])
-            data_i8 = b.inttoptr(raw, i8p)
+            data_i8 = _alloc_bytes(ctx, state, ir.Constant(i64, total), ir.Constant(i64, elem_align), e)
             b.store(data_i8, data_ptr)
             elem_ll = _llvm_type(ctx, elem_ty)
             typed = b.bitcast(data_i8, elem_ll.as_pointer())
@@ -1741,8 +1955,7 @@ def _compile_stmt(ctx: _ModuleCtx, state: _FnState, st: Any, overflow_mode: str)
                 elif st.op == "/=":
                     out = b.fdiv(lv.value, rv.value)
                 elif st.op == "%=":
-                    fn = _declare_runtime(ctx, "astra_fmod")
-                    out = b.call(fn, [lv.value, rv.value])
+                    out = b.frem(lv.value, rv.value)
                 else:
                     raise CodegenError(_diag(st, f"unsupported assignment op {st.op}"))
                 b.store(out, ptr)
@@ -1804,8 +2017,7 @@ def _compile_stmt(ctx: _ModuleCtx, state: _FnState, st: Any, overflow_mode: str)
                         elif st.op == "/=":
                             out = b.fdiv(lv, rv)
                         elif st.op == "%=":
-                            fn = _declare_runtime(ctx, "astra_fmod")
-                            out = b.call(fn, [lv, rv])
+                            out = b.frem(lv, rv)
                         else:
                             raise CodegenError(_diag(st, f"unsupported field assignment op {st.op}"))
                     else:
@@ -1858,8 +2070,7 @@ def _compile_stmt(ctx: _ModuleCtx, state: _FnState, st: Any, overflow_mode: str)
                 elif st.op == "/=":
                     out = b.fdiv(lv, rv)
                 elif st.op == "%=":
-                    fn = _declare_runtime(ctx, "astra_fmod")
-                    out = b.call(fn, [lv, rv])
+                    out = b.frem(lv, rv)
                 else:
                     raise CodegenError(_diag(st, f"unsupported field assignment op {st.op}"))
             else:
@@ -1917,8 +2128,7 @@ def _compile_stmt(ctx: _ModuleCtx, state: _FnState, st: Any, overflow_mode: str)
                 elif st.op == "/=":
                     out = b.fdiv(lv, rv)
                 elif st.op == "%=":
-                    fn = _declare_runtime(ctx, "astra_fmod")
-                    out = b.call(fn, [lv, rv])
+                    out = b.frem(lv, rv)
                 else:
                     raise CodegenError(_diag(st, f"unsupported index assignment op {st.op}"))
             else:
@@ -2342,6 +2552,7 @@ def to_llvm_ir(
     ctx = _ModuleCtx(
         module=module,
         triple=module.triple,
+        freestanding=freestanding,
         structs={},
         struct_decls={},
         slice_header_ty=ir.LiteralStructType([ir.IntType(64), ir.IntType(8).as_pointer()]),

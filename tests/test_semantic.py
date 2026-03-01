@@ -60,6 +60,20 @@ def test_freestanding_allows_no_main():
     analyze(parse(src), freestanding=True)
 
 
+def test_freestanding_rejects_hosted_runtime_builtin_calls():
+    src = 'fn _start() -> Int { print("x"); return 0; }'
+    try:
+        analyze(parse(src), freestanding=True)
+        assert False
+    except SemanticError as e:
+        assert "freestanding mode forbids builtin print" in str(e)
+
+
+def test_freestanding_allows_pure_intrinsic_builtins():
+    src = "fn _start() -> Int { return countOnes(7u4); }"
+    analyze(parse(src), freestanding=True)
+
+
 def test_coalesce_type_inference():
     src = "fn main() -> Int { let x: Option<Int> = none; let y: Int = x ?? 4; return y; }"
     analyze(parse(src))
@@ -188,6 +202,40 @@ def test_slice_indexing_returns_element_type():
 def test_vec_indexing_returns_element_type():
     src = "fn first(xs: Vec<i16>) -> i16 { return xs[0]; } fn main() -> Int { return 0; }"
     analyze(parse(src))
+
+
+def test_vec_builtins_typecheck():
+    src = """
+fn main() -> Int {
+  let mut v: Vec<Int> = vec_new();
+  drop vec_push(v, 1);
+  drop vec_push(v, 2);
+  drop vec_set(v, 1, 9);
+  let got: Option<Int> = vec_get(v, 1);
+  return vec_len(v) + (got ?? 0);
+}
+"""
+    analyze(parse(src))
+
+
+def test_vec_from_slice_infers_element_type():
+    src = "fn main() -> Int { let mut v = vec_from([1, 2, 3]); drop vec_push(v, 4); return vec_len(v); }"
+    analyze(parse(src))
+
+
+def test_vec_builtins_reject_element_type_mismatch():
+    src = """
+fn main() -> Int {
+  let mut v: Vec<Int> = vec_new();
+  drop vec_push(v, "x");
+  return 0;
+}
+"""
+    try:
+        analyze(parse(src))
+        assert False
+    except SemanticError as e:
+        assert "arg 1 for vec_push" in str(e)
 
 
 def test_bytes_alias_matches_vec_u8_in_calls():

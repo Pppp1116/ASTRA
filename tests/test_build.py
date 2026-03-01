@@ -6,6 +6,7 @@ import pytest
 
 import astra.build as build_mod
 from astra.build import build
+from astra.semantic import SemanticError
 
 
 def test_build_py(tmp_path: Path):
@@ -173,6 +174,107 @@ fn main() -> Int {
     cp = subprocess.run([str(out)], capture_output=True, text=True)
     assert cp.returncode == 9
     assert cp.stdout == "bye\nbye\n"
+
+
+@pytest.mark.skipif(
+    shutil.which("clang") is None,
+    reason="native target requires clang",
+)
+def test_build_native_freestanding_runtime_free_program_links_without_runtime(tmp_path: Path):
+    src = tmp_path / "k.astra"
+    out = tmp_path / "k.exe"
+    src.write_text(
+        """
+fn _start() -> Int {
+  let x = 40 + 2;
+  return x;
+}
+"""
+    )
+    st = build(str(src), str(out), "native", freestanding=True)
+    assert st in {"built", "cached"}
+    assert out.exists()
+    assert out.stat().st_mode & 0o111
+
+
+def test_build_freestanding_rejects_runtime_builtins(tmp_path: Path):
+    src = tmp_path / "bad.astra"
+    out = tmp_path / "bad.ll"
+    src.write_text(
+        """
+fn _start() -> Int {
+  print("x");
+  return 0;
+}
+"""
+    )
+    with pytest.raises(SemanticError, match="freestanding mode forbids builtin print"):
+        build(str(src), str(out), "llvm", freestanding=True)
+
+
+def test_build_native_freestanding_requires_start_symbol(tmp_path: Path):
+    src = tmp_path / "bad_start.astra"
+    out = tmp_path / "bad_start.exe"
+    src.write_text("fn kernel() -> Int { return 0; }")
+    with pytest.raises(RuntimeError, match=r"freestanding native target requires fn _start\(\)"):
+        build(str(src), str(out), "native", freestanding=True)
+
+
+def test_build_freestanding_rejects_external_host_symbols(tmp_path: Path):
+    src = tmp_path / "host_dep.astra"
+    out = tmp_path / "host_dep.ll"
+    src.write_text(
+        """
+extern c fn host() -> Int;
+fn _start() -> Int {
+  return host();
+}
+"""
+    )
+    with pytest.raises(RuntimeError, match="freestanding build cannot depend on external host symbols: host"):
+        build(str(src), str(out), "llvm", freestanding=True)
+
+
+def test_build_freestanding_supports_vec_builtins_without_runtime_symbols(tmp_path: Path):
+    src = tmp_path / "vec_fs.astra"
+    out = tmp_path / "vec_fs.ll"
+    src.write_text(
+        """
+fn _start() -> Int {
+  let mut v: Vec<Int> = vec_new();
+  drop vec_push(v, 40);
+  drop vec_push(v, 2);
+  let got: Option<Int> = vec_get(v, 1);
+  drop vec_set(v, 0, 1);
+  return vec_len(v) + (got ?? 0);
+}
+"""
+    )
+    st = build(str(src), str(out), "llvm", freestanding=True)
+    assert st in {"built", "cached"}
+    text = out.read_text()
+    assert "@astra_" not in text
+    assert "__astra_fs_heap" in text
+
+
+def test_build_freestanding_supports_array_literals_and_struct_constructors(tmp_path: Path):
+    src = tmp_path / "alloc_fs.astra"
+    out = tmp_path / "alloc_fs.ll"
+    src.write_text(
+        """
+struct Pair { a Int, b Int }
+fn _start() -> Int {
+  let p = Pair(2, 3);
+  let xs = vec_from([7, 11, 13]);
+  return p.a + p.b + (vec_get(xs, 1) ?? 0);
+}
+"""
+    )
+    st = build(str(src), str(out), "llvm", freestanding=True)
+    assert st in {"built", "cached"}
+    text = out.read_text()
+    assert "@astra_" not in text
+    assert "__astra_fs_heap" in text
 
 
 @pytest.mark.skipif(

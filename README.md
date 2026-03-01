@@ -26,6 +26,11 @@ python build/hello.py
 - `astra check <in> [--freestanding] [--overflow trap|wrap|debug]`
 - `astra test [--kind unit|integration|e2e]`
 - `--target native` compiles/links LLVM IR into an executable via `clang` and the portable runtime (`runtime/llvm_runtime.c`).
+- `--freestanding` enforces runtime-free semantics/codegen for LLVM/native outputs:
+  - hosted/runtime builtins are rejected during semantic analysis
+  - LLVM IR cannot reference `astra_*` runtime symbols or other external host symbols
+  - `--target native --freestanding` requires `fn _start()`
+  - freestanding container API is `vec_new`, `vec_from`, `vec_len`, `vec_get`, `vec_set`, `vec_push` (no hosted runtime shims)
 
 ## Syntax notes
 - Immutable locals use `fixed`, mutable/inferred locals use `let`.

@@ -190,6 +190,12 @@ BUILTIN_SIGS: dict[str, BuiltinSig] = {
     "countOnes": BuiltinSig(["Any"], "Int"),
     "leadingZeros": BuiltinSig(["Any"], "Int"),
     "trailingZeros": BuiltinSig(["Any"], "Int"),
+    "vec_new": BuiltinSig([], "Any"),
+    "vec_from": BuiltinSig(["Any"], "Any"),
+    "vec_len": BuiltinSig(["Any"], "Int"),
+    "vec_get": BuiltinSig(["Any", "Int"], "Any"),
+    "vec_set": BuiltinSig(["Any", "Int", "Any"], "Int"),
+    "vec_push": BuiltinSig(["Any", "Any"], "Int"),
 }
 
 for _name, _sig in list(BUILTIN_SIGS.items()):
@@ -198,6 +204,64 @@ for _name, _sig in list(BUILTIN_SIGS.items()):
     if _name in {"print", "len", "read_file", "write_file", "args", "arg", "spawn", "join", "alloc", "free", "await_result"}:
         continue
     BUILTIN_SIGS[f"__{_name}"] = _sig
+
+
+_FREESTANDING_FORBIDDEN_BUILTINS: set[str] = {
+    "print",
+    "len",
+    "read_file",
+    "write_file",
+    "args",
+    "arg",
+    "spawn",
+    "join",
+    "alloc",
+    "free",
+    "list_new",
+    "list_push",
+    "list_get",
+    "list_set",
+    "list_len",
+    "map_new",
+    "map_has",
+    "map_get",
+    "map_set",
+    "file_exists",
+    "file_remove",
+    "tcp_connect",
+    "tcp_send",
+    "tcp_recv",
+    "tcp_close",
+    "to_json",
+    "from_json",
+    "sha256",
+    "hmac_sha256",
+    "env_get",
+    "cwd",
+    "proc_run",
+    "now_unix",
+    "monotonic_ms",
+    "sleep_ms",
+    "panic",
+    "proc_exit",
+}
+_FREESTANDING_MODE_STACK: list[bool] = []
+
+
+def _builtin_base_name(name: str) -> str:
+    return name[2:] if name.startswith("__") else name
+
+
+def _freestanding_mode_enabled() -> bool:
+    return bool(_FREESTANDING_MODE_STACK and _FREESTANDING_MODE_STACK[-1])
+
+
+def _require_freestanding_builtin_allowed(name: str, filename: str, line: int, col: int) -> None:
+    if not _freestanding_mode_enabled():
+        return
+    base = _builtin_base_name(name)
+    if base in _FREESTANDING_FORBIDDEN_BUILTINS:
+        raise SemanticError(_diag(filename, line, col, f"freestanding mode forbids builtin {base}"))
 
 
 class _OwnedState:
@@ -736,61 +800,65 @@ def _choose_impl(
 
 
 def analyze(prog: Program, filename: str = "<input>", freestanding: bool = False):
-    fn_groups: dict[str, list[FnDecl | ExternFnDecl]] = {}
-    structs: dict[str, StructDecl] = {}
-    enums: dict[str, EnumDecl] = {}
-    for item in prog.items:
-        if isinstance(item, ImportDecl):
-            _resolve_import(item.path, filename, item.line, item.col)
-            continue
-        if isinstance(item, StructDecl):
-            for _, field_ty in item.fields:
-                _validate_decl_type(field_ty, filename, item.line, item.col)
-            if item.packed:
-                for field_name, field_ty in item.fields:
-                    c = _canonical_type(field_ty)
-                    if c != "Bool" and not _is_int_type(c):
-                        raise SemanticError(_diag(filename, item.line, item.col, "packed struct fields must be integer or bool types"))
-                    info = _int_info(c)
-                    if info is not None and info[0] > 64:
-                        raise SemanticError(_diag(filename, item.line, item.col, f"packed field {field_name} width {info[0]} exceeds current backend limit of 64 bits"))
-            structs[item.name] = item
-            continue
-        if isinstance(item, TypeAliasDecl):
-            _validate_decl_type(item.target, filename, item.line, item.col)
-            continue
-        if isinstance(item, EnumDecl):
-            enums[item.name] = item
-            continue
-        if isinstance(item, (FnDecl, ExternFnDecl)):
-            for _, pty in item.params:
-                _validate_decl_type(pty, filename, item.line, item.col)
-            _validate_decl_type(item.ret, filename, item.line, item.col)
-            fn_groups.setdefault(item.name, []).append(item)
-
-    for name, decls in fn_groups.items():
-        if len(decls) == 1 and not (isinstance(decls[0], FnDecl) and decls[0].is_impl):
-            if isinstance(decls[0], FnDecl):
-                decls[0].symbol = name
-            continue
-        for i, d in enumerate(decls):
-            if isinstance(d, FnDecl):
-                d.symbol = f"{name}__impl{i}"
-
-    if not freestanding:
-        mains = [d for d in fn_groups.get("main", []) if isinstance(d, FnDecl)]
-        if not mains:
-            raise SemanticError(_diag(filename, 1, 1, "missing main()"))
-        if len(mains) != 1:
-            raise SemanticError(_diag(filename, mains[0].line, mains[0].col, "main() must have a single unambiguous impl"))
-        if mains[0].is_impl:
-            raise SemanticError(_diag(filename, mains[0].line, mains[0].col, "main() cannot be declared with impl"))
-
-    for decls in fn_groups.values():
-        for fn in decls:
-            if isinstance(fn, ExternFnDecl):
+    _FREESTANDING_MODE_STACK.append(freestanding)
+    try:
+        fn_groups: dict[str, list[FnDecl | ExternFnDecl]] = {}
+        structs: dict[str, StructDecl] = {}
+        enums: dict[str, EnumDecl] = {}
+        for item in prog.items:
+            if isinstance(item, ImportDecl):
+                _resolve_import(item.path, filename, item.line, item.col)
                 continue
-            _analyze_fn(fn, fn_groups, structs, enums, filename)
+            if isinstance(item, StructDecl):
+                for _, field_ty in item.fields:
+                    _validate_decl_type(field_ty, filename, item.line, item.col)
+                if item.packed:
+                    for field_name, field_ty in item.fields:
+                        c = _canonical_type(field_ty)
+                        if c != "Bool" and not _is_int_type(c):
+                            raise SemanticError(_diag(filename, item.line, item.col, "packed struct fields must be integer or bool types"))
+                        info = _int_info(c)
+                        if info is not None and info[0] > 64:
+                            raise SemanticError(_diag(filename, item.line, item.col, f"packed field {field_name} width {info[0]} exceeds current backend limit of 64 bits"))
+                structs[item.name] = item
+                continue
+            if isinstance(item, TypeAliasDecl):
+                _validate_decl_type(item.target, filename, item.line, item.col)
+                continue
+            if isinstance(item, EnumDecl):
+                enums[item.name] = item
+                continue
+            if isinstance(item, (FnDecl, ExternFnDecl)):
+                for _, pty in item.params:
+                    _validate_decl_type(pty, filename, item.line, item.col)
+                _validate_decl_type(item.ret, filename, item.line, item.col)
+                fn_groups.setdefault(item.name, []).append(item)
+
+        for name, decls in fn_groups.items():
+            if len(decls) == 1 and not (isinstance(decls[0], FnDecl) and decls[0].is_impl):
+                if isinstance(decls[0], FnDecl):
+                    decls[0].symbol = name
+                continue
+            for i, d in enumerate(decls):
+                if isinstance(d, FnDecl):
+                    d.symbol = f"{name}__impl{i}"
+
+        if not freestanding:
+            mains = [d for d in fn_groups.get("main", []) if isinstance(d, FnDecl)]
+            if not mains:
+                raise SemanticError(_diag(filename, 1, 1, "missing main()"))
+            if len(mains) != 1:
+                raise SemanticError(_diag(filename, mains[0].line, mains[0].col, "main() must have a single unambiguous impl"))
+            if mains[0].is_impl:
+                raise SemanticError(_diag(filename, mains[0].line, mains[0].col, "main() cannot be declared with impl"))
+
+        for decls in fn_groups.values():
+            for fn in decls:
+                if isinstance(fn, ExternFnDecl):
+                    continue
+                _analyze_fn(fn, fn_groups, structs, enums, filename)
+    finally:
+        _FREESTANDING_MODE_STACK.pop()
 
 
 def _analyze_fn(
@@ -1294,6 +1362,7 @@ def _infer(
             return _typed(e, "Any")
         sig = BUILTIN_SIGS.get(e.value)
         if sig is not None:
+            _require_freestanding_builtin_allowed(e.value, filename, e.line, e.col)
             if sig.args is None:
                 return _typed(e, "Any")
             return _typed(e, f"fn({', '.join(sig.args)}) -> {sig.ret}")
@@ -1508,6 +1577,51 @@ def _infer_call(
             if not _is_int_type(aty):
                 raise SemanticError(_diag(filename, e.args[0].line, e.args[0].col, f"{name} expects an integer argument, got {aty}"))
             return "Int"
+        if builtin_base == "vec_new":
+            if len(e.args) != 0:
+                raise SemanticError(_diag(filename, e.line, e.col, f"{name} expects 0 args, got {len(e.args)}"))
+            return "Any"
+        if builtin_base == "vec_from":
+            if len(e.args) != 1:
+                raise SemanticError(_diag(filename, e.line, e.col, f"{name} expects 1 args, got {len(e.args)}"))
+            src_ty = _canonical_type(arg_types[0])
+            if _is_vec_type(src_ty):
+                return src_ty
+            if _is_slice_type(src_ty):
+                return f"Vec<{_slice_inner(src_ty)}>"
+            raise SemanticError(_diag(filename, e.args[0].line, e.args[0].col, f"{name} expects [T] or Vec<T>, got {src_ty}"))
+        if builtin_base == "vec_len":
+            if len(e.args) != 1:
+                raise SemanticError(_diag(filename, e.line, e.col, f"{name} expects 1 args, got {len(e.args)}"))
+            src_ty = _canonical_type(arg_types[0])
+            if not _is_vec_type(src_ty):
+                raise SemanticError(_diag(filename, e.args[0].line, e.args[0].col, f"{name} expects Vec<T>, got {src_ty}"))
+            return "Int"
+        if builtin_base == "vec_get":
+            if len(e.args) != 2:
+                raise SemanticError(_diag(filename, e.line, e.col, f"{name} expects 2 args, got {len(e.args)}"))
+            src_ty = _canonical_type(arg_types[0])
+            if not _is_vec_type(src_ty):
+                raise SemanticError(_diag(filename, e.args[0].line, e.args[0].col, f"{name} expects Vec<T>, got {src_ty}"))
+            _require_type(filename, e.args[1].line, e.args[1].col, "Int", arg_types[1], f"arg 1 for {name}")
+            return f"Option<{_vec_inner(src_ty)}>"
+        if builtin_base == "vec_set":
+            if len(e.args) != 3:
+                raise SemanticError(_diag(filename, e.line, e.col, f"{name} expects 3 args, got {len(e.args)}"))
+            src_ty = _canonical_type(arg_types[0])
+            if not _is_vec_type(src_ty):
+                raise SemanticError(_diag(filename, e.args[0].line, e.args[0].col, f"{name} expects Vec<T>, got {src_ty}"))
+            _require_type(filename, e.args[1].line, e.args[1].col, "Int", arg_types[1], f"arg 1 for {name}")
+            _require_type(filename, e.args[2].line, e.args[2].col, _vec_inner(src_ty), arg_types[2], f"arg 2 for {name}")
+            return "Int"
+        if builtin_base == "vec_push":
+            if len(e.args) != 2:
+                raise SemanticError(_diag(filename, e.line, e.col, f"{name} expects 2 args, got {len(e.args)}"))
+            src_ty = _canonical_type(arg_types[0])
+            if not _is_vec_type(src_ty):
+                raise SemanticError(_diag(filename, e.args[0].line, e.args[0].col, f"{name} expects Vec<T>, got {src_ty}"))
+            _require_type(filename, e.args[1].line, e.args[1].col, _vec_inner(src_ty), arg_types[1], f"arg 1 for {name}")
+            return "Int"
         if name in fn_groups:
             known_types = set(PRIMITIVES) | set(structs.keys()) | set(enums.keys())
             decl = _choose_impl(name, fn_groups[name], arg_types, known_types, filename, e.line, e.col)
@@ -1548,6 +1662,7 @@ def _infer_call(
             return name
         sig = BUILTIN_SIGS.get(name)
         if sig is not None:
+            _require_freestanding_builtin_allowed(name, filename, e.line, e.col)
             if sig.args is not None and len(e.args) != len(sig.args):
                 raise SemanticError(_diag(filename, e.line, e.col, f"{name} expects {len(sig.args)} args, got {len(e.args)}"))
             if sig.args is not None:

@@ -7,6 +7,11 @@
 - `astra test [--kind unit|integration|e2e]`
 - `astra selfhost` (currently unavailable: placeholder only, no real self-hosting pipeline)
 - `--target native` requires `clang` in `PATH` and links against the portable runtime (`runtime/llvm_runtime.c`).
+- `--freestanding` enforces runtime-free semantics/codegen for LLVM/native outputs:
+  - hosted/runtime builtins are rejected in semantic analysis
+  - emitted LLVM IR cannot reference `astra_*` runtime symbols or non-LLVM external host symbols
+  - `native --freestanding` requires `fn _start()`
+  - freestanding vectors use builtins: `vec_new`, `vec_from`, `vec_len`, `vec_get`, `vec_set`, `vec_push`
 
 ## Tooling
 - `astpm init/add/lock`
