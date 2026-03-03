@@ -19,7 +19,9 @@ fn run_ok(cmd: String) -> Bool { return run(cmd) == 0; }
 
 /// Print a message to stderr using the host shell. This is a best-effort
 /// helper intended for diagnostics in hosted mode.
+/// The message is passed via printf inside single quotes so that shell
+/// metacharacters (; $ ` etc.) are not interpreted.
 fn eprintln(msg: String) -> Int {
-  return run("echo " + msg + " 1>&2");
+  return run("printf '%s\\n' '" + msg + "' 1>&2");
 }
 

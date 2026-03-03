@@ -1,4 +1,0 @@
-# file: /home/pedro/Downloads/programming-language-/astra/layout.py
-# hypothesis_version: 6.151.9
-
-['&', '&mut ', '>', '?', 'Any', 'Bool', 'Bytes', 'Float', 'Never', 'Option<', 'String', 'Vec<', 'Vec<u8>', 'Void', '[', ']', 'codegen', 'f32', 'f64', 'float', 'fn(', 'fnptr', 'int', 'ptr', 'query', 'str', 'struct', 'void']

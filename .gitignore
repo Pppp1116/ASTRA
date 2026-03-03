@@ -6,3 +6,4 @@ build/
 .pytest_cache/
 _asm_check.s
 _asm_check.o
+.hypothesis/

@@ -1,4 +1,0 @@
-# file: /home/pedro/Downloads/programming-language-/astra/lsp.py
-# hypothesis_version: 6.151.9
-
-[', ', '...', '0', '2.0', ':', '<memory>', 'Astra source', '_', '__', '__main__', 'astra', 'async', 'await', 'break', 'builtin', 'capabilities', 'character', 'col', 'completionProvider', 'content-length', 'contentChanges', 'contents', 'continue', 'definitionProvider', 'detail', 'diagnostics', 'drop', 'else', 'end', 'enum', 'extern', 'fn', 'for', 'function', 'hoverProvider', 'id', 'if', 'import', 'inferred_type', 'initialize', 'items', 'jsonrpc', 'keyword', 'kind', 'label', 'let', 'line', 'local', 'match', 'message', 'method', 'mut', 'none', 'param', 'params', 'position', 'pub', 'range', 'resolveProvider', 'result', 'return', 'severity', 'source', 'start', 'struct', 'text', 'textDocument', 'textDocument/didOpen', 'textDocument/hover', 'textDocumentSync', 'type', 'unsafe', 'uri', 'while']

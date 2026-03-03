@@ -118,6 +118,25 @@ fn main() -> Int {
     assert st in {"built", "cached"}
 
 
+def test_build_strict_mode_accepts_wildcard_pattern_in_match(tmp_path: Path):
+    src = tmp_path / "strict_wildcard.astra"
+    out = tmp_path / "strict_wildcard.py"
+    src.write_text(
+        """
+fn main() -> Int {
+  let x = 2;
+  match x {
+    1 => { return 1; }
+    _ => { return 0; }
+  }
+  return 0;
+}
+"""
+    )
+    st = build(str(src), str(out), "py", strict=True)
+    assert st in {"built", "cached"}
+
+
 @pytest.mark.skipif(
     shutil.which("clang") is None,
     reason="native target requires clang",

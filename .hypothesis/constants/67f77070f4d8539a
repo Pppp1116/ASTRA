@@ -1,4 +1,0 @@
-# file: /home/pedro/Downloads/programming-language-/astra/asm_assert.py
-# hypothesis_version: 6.151.9
-
-['-felf64', '-o', ':', 'TODO', '^[a-z]+(\\s|$)', '_asm_check.o', '_asm_check.s', '_start:', 'global ', 'global _start', 'missing text section', 'nasm', 'section ', 'section .text', 'unsupported']

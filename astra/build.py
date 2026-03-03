@@ -50,6 +50,7 @@ from astra.ast import (
     Unary,
     UnsafeStmt,
     WhileStmt,
+    WildcardPattern,
 )
 from astra.comptime import run_comptime
 from astra.codegen import to_python
@@ -210,6 +211,7 @@ _STRICT_EXPRS = {
     MinValTypeExpr,
     SizeOfValueExpr,
     AlignOfValueExpr,
+    WildcardPattern,
 }
 _STRICT_UNARY_OPS = {"-", "!", "~", "&", "&mut", "*"}
 _STRICT_BINARY_OPS = {
