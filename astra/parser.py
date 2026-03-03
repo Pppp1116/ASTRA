@@ -503,6 +503,61 @@ class Parser:
                     dots_tok.line,
                     dots_tok.col,
                 )
+                # Parse body and ensure `continue` doesn't skip the implicit step in backends
+                # that emit the step at the end of the loop body.
+                body = self.parse_block()
+
+                def _make_step_stmt() -> AssignStmt:
+                    return AssignStmt(
+                        Name(idx_name, ident.pos, ident.line, ident.col),
+                        "+=",
+                        Literal(1, dots_tok.pos, dots_tok.line, dots_tok.col),
+                        dots_tok.pos,
+                        dots_tok.line,
+                        dots_tok.col,
+                    )
+
+                def _patch_continues(stmts: list[Any]) -> list[Any]:
+                    out: list[Any] = []
+                    for s in stmts:
+                        # Do not descend into nested loops: their `continue` targets the inner loop.
+                        if isinstance(s, (WhileStmt, ForStmt)):
+                            out.append(s)
+                            continue
+
+                        if isinstance(s, ContinueStmt):
+                            out.append(_make_step_stmt())
+                            out.append(s)
+                            continue
+
+                        if isinstance(s, IfStmt):
+                            s.then_body = _patch_continues(s.then_body)
+                            s.else_body = _patch_continues(s.else_body)
+                            out.append(s)
+                            continue
+
+                        if isinstance(s, MatchStmt):
+                            s.arms = [(pat, _patch_continues(arm_body)) for (pat, arm_body) in s.arms]
+                            out.append(s)
+                            continue
+
+                        if isinstance(s, UnsafeStmt):
+                            s.body = _patch_continues(s.body)
+                            out.append(s)
+                            continue
+
+                        if isinstance(s, ComptimeStmt):
+                            s.body = _patch_continues(s.body)
+                            out.append(s)
+                            continue
+
+                        out.append(s)
+                    return out
+
+                body = _patch_continues(body)
+
+                # Keep the normal end-of-iteration step for non-continue paths.
+                step = _make_step_stmt()
                 return ForStmt(init, cond, step, body, tok.pos, tok.line, tok.col)
             self._err("for-in currently supports only range syntax `start..end` or `start..=end`", self.cur())
             raise ParseError(self.errors[-1])
