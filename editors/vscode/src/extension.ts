@@ -69,14 +69,14 @@ async function startLanguageServer(context: vscode.ExtensionContext) {
     const serverPath = config.get<string>('languageServerPath', 'astlsp');
 
     try {
-        const { LanguageClient, LanguageClientOptions, ServerOptions } = await import('vscode-languageclient/node');
+        const { LanguageClient } = await import('vscode-languageclient/node');
 
-        const serverOptions: ServerOptions = {
+        const serverOptions = {
             command: serverPath,
             args: []
         };
 
-        const clientOptions: LanguageClientOptions = {
+        const clientOptions = {
             documentSelector: [{ scheme: 'file', language: 'astra' }],
             synchronize: {
                 fileEvents: vscode.workspace.createFileSystemWatcher('**/*.astra')
@@ -91,7 +91,8 @@ async function startLanguageServer(context: vscode.ExtensionContext) {
             clientOptions
         );
 
-        context.subscriptions.push(client.start());
+        client.start();
+        context.subscriptions.push(client);
     } catch (error) {
         vscode.window.showErrorMessage(`Failed to start language server: ${error}`);
     }

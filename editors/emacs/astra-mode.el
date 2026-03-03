@@ -20,14 +20,14 @@
 
 (defconst astra-font-lock-keywords
   (list
-   ;; Keywords
-   '("\\<\\(fn\\|let\\|mut\\|return\\|if\\|else\\|while\\|for\\|break\\|continue\\|struct\\|enum\\|type\\|import\\|pub\\|extern\\|async\\|await\\|unsafe\\|match\\|drop\\|defer\\|none\\)\\>" . font-lock-keyword-face)
+   ;; Keywords - updated with all keywords from lexer
+   '("\\<\\(fn\\|let\\|fixed\\|mut\\|return\\|if\\|else\\|while\\|for\\|break\\|continue\\|struct\\|enum\\|type\\|import\\|pub\\|extern\\|async\\|await\\|unsafe\\|impl\\|match\\|defer\\|drop\\|comptime\\|none\\|in\\|as\\|sizeof\\|alignof\\)\\>" . font-lock-keyword-face)
    
    ;; Types
    '("\\<\\(Void\\|Never\\|Bool\\|Int\\|isize\\|usize\\|Float\\|String\\|str\\|Any\\|Vec\\|Option\\)\\>" . font-lock-type-face)
    
-   ;; Operators
-   '("\\<\\(as\\|sizeof\\|alignof\\)\\>" . font-lock-operator-face)
+   ;; Operators and builtins
+   '("\\<\\(as\\|sizeof\\|alignof\\|size_of\\|align_of\\|bitSizeOf\\|maxVal\\|minVal\\)\\>" . font-lock-operator-face)
    
    ;; Boolean literals
    '("\\<\\(true\\|false\\)\\>" . font-lock-constant-face)
@@ -35,20 +35,38 @@
    ;; None literal
    '("\\<none\\>" . font-lock-constant-face)
    
-   ;; Numbers
+   ;; Numbers - updated with all formats
    '("\\b\\d+\\b" . font-lock-constant-face)
    '("\\b\\d+\\.\\d+\\b" . font-lock-constant-face)
    '("\\b0x[0-9a-fA-F]+\\b" . font-lock-constant-face)
    '("\\b0b[01]+\\b" . font-lock-constant-face)
    '("\\b\\d+\\(u?\\d+\\|i\\d+\\)\\b" . font-lock-constant-face)
    
-   ;; Strings
+   ;; Strings - updated with triple quotes
    '("\"[^\"]*\"" . font-lock-string-face)
    '("'[^']*'" . font-lock-string-face)
+   '("\"\"\"[^\"]*\"\"\"" . font-lock-string-face)
    
-   ;; Comments
+   ;; Comments - updated with doc comments
    '("//.*" . font-lock-comment-face)
-   '("/\\*.*?\\*/" . font-lock-comment-face))
+   '("///.*" . font-lock-doc-comment-face)
+   '("/\\*.*?\\*/" . font-lock-comment-face)
+   
+   ;; Attributes
+   '("@[a-zA-Z_][a-zA-Z0-9_]*" . font-lock-preprocessor-face)
+   
+   ;; Multi-character operators
+   '("&&=\\||=\\|\\.\\.\\.\\|::\\|=>\\|->\\|==\\|!=\\|<=\\|>=\\|&&\\|||\\|??\\|+=\\|-=" . font-lock-operator-face)
+   '("\\*=\\|/=\\|%=\\|<<=\\|>>=\\|&=\\||=\\|^=\\|<<\\|>>\\|\\.\\." . font-lock-operator-face)
+   
+   ;; Functions
+   '("\\<[a-z_][a-zA-Z0-9_]*\\s*\\ze(" . font-lock-function-name-face)
+   
+   ;; Variables
+   '("\\<[a-z_][a-zA-Z0-9_]*\\>" . font-lock-variable-name-face)
+   
+   ;; Generic types
+   '("<\\|>" . font-lock-special))
   "Font lock keywords for Astra mode.")
 
 (defvar astra-mode-syntax-table

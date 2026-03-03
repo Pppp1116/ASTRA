@@ -37,6 +37,11 @@
           "end": "$"
         },
         {
+          "name": "comment.line.doc.astra",
+          "begin": "///",
+          "end": "$"
+        },
+        {
           "name": "comment.block.astra",
           "begin": "/\\*",
           "end": "\\*/"
@@ -47,11 +52,15 @@
       "patterns": [
         {
           "name": "keyword.control.astra",
-          "match": "\\b(fn|let|mut|return|if|else|while|for|break|continue|struct|enum|type|import|pub|extern|async|await|unsafe|match|drop|defer|none)\\b"
+          "match": "\\b(fn|let|fixed|mut|return|if|else|while|for|break|continue|struct|enum|type|import|pub|extern|async|await|unsafe|impl|match|defer|drop|comptime|none|in|as|sizeof|alignof)\\b"
         },
         {
           "name": "storage.type.astra",
           "match": "\\b(Void|Never|Bool|Int|isize|usize|Float|String|str|Any)\\b"
+        },
+        {
+          "name": "storage.type.generic.astra",
+          "match": "\\b(Vec|Option)\\b"
         }
       ]
     },
@@ -60,10 +69,6 @@
         {
           "name": "entity.name.type.astra",
           "match": "\\b[A-Z][a-zA-Z0-9_]*\\b"
-        },
-        {
-          "name": "storage.type.generic.astra",
-          "match": "\\b(Vec|Option)\\b"
         },
         {
           "name": "punctuation.generic.astra",
@@ -88,6 +93,17 @@
           "name": "string.quoted.single.astra",
           "begin": "'",
           "end": "'",
+          "patterns": [
+            {
+              "name": "constant.character.escape.astra",
+              "match": "\\\\."
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.triple.astra",
+          "begin": "\"\"\"",
+          "end": "\"\"\"",
           "patterns": [
             {
               "name": "constant.character.escape.astra",
@@ -126,6 +142,10 @@
         {
           "name": "keyword.operator.assignment.astra",
           "match": "\\+=|\\-=|\\*=|/=|%=|\\^=|&=|\\|=|<<=|>>="
+        },
+        {
+          "name": "keyword.operator.multi.astra",
+          "match": "&&=|\\|\\|=|\\.\\.\\.|::|=>|->|==|!=|<=|>=|&&|\\|\\||\\?\\?|\\+=|\\-=|\\*=|/=|%=|&=|\\|=|\\^=|<<=|>>=|<<|>>|\\.\\."
         }
       ]
     },
@@ -154,6 +174,18 @@
         {
           "name": "variable.other.astra",
           "match": "\\b[a-z_][a-zA-Z0-9_]*\\b"
+        },
+        {
+          "name": "constant.language.astra",
+          "match": "\\b(true|false|none)\\b"
+        },
+        {
+          "name": "support.function.builtin.astra",
+          "match": "\\b(sizeof|alignof|size_of|align_of|bitSizeOf|maxVal|minVal)\\b"
+        },
+        {
+          "name": "meta.attribute.astra",
+          "match": "@[a-zA-Z_][a-zA-Z0-9_]*"
         }
       ]
     }

@@ -1,43 +1,42 @@
 {
-  "name": "astra-lang",
+  "name": "astra-language",
   "displayName": "Astra Language",
-  "description": "Astra language support - syntax highlighting, IntelliSense, debugging, and more",
-  "version": "0.2.0",
-  "publisher": "astra-lang",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/Pppp1116/ASTRA"
-  },
-  "license": "MIT",
+  "description": "Astra programming language support for VS Code",
+  "version": "0.1.0",
   "engines": {
     "vscode": "^1.85.0"
   },
   "categories": [
-    "Programming Languages",
-    "Snippets",
-    "Linters",
-    "Debuggers"
+    "Programming Languages"
   ],
   "keywords": [
     "astra",
-    "programming language",
-    "llvm",
-    "compiler"
+    "language",
+    "programming",
+    "lsp"
   ],
+  "homepage": "https://github.com/Pppp1116/ASTRA",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Pppp1116/ASTRA.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Pppp1116/ASTRA/issues"
+  },
+  "license": "MIT",
+  "publisher": "astra-lang",
   "main": "./out/extension.js",
-  "activationEvents": [
-    "onLanguage:astra",
-    "onCommand:workspace.runAstraFile",
-    "onCommand:workspace.buildAstraFile",
-    "onCommand:workspace.checkAstraFile",
-    "onCommand:workspace.formatAstraFile"
-  ],
   "contributes": {
     "languages": [
       {
         "id": "astra",
-        "aliases": ["Astra", "astra"],
-        "extensions": [".astra"],
+        "aliases": [
+          "Astra",
+          "astra"
+        ],
+        "extensions": [
+          ".astra"
+        ],
         "configuration": "./language-configuration.json"
       }
     ],
@@ -54,50 +53,50 @@
         "path": "./snippets/astra.json"
       }
     ],
-    "configuration": [
-      {
-        "title": "Astra",
-        "properties": {
-          "astra.languageServerPath": {
-            "type": "string",
-            "default": "astlsp",
-            "description": "Path to the Astra Language Server executable"
-          },
-          "astra.enableAdvancedDiagnostics": {
-            "type": "boolean",
-            "default": true,
-            "description": "Enable advanced diagnostic features"
-          },
-          "astra.formatting.enabled": {
-            "type": "boolean",
-            "default": true,
-            "description": "Enable automatic formatting"
-          },
-          "astra.formatting.onSave": {
-            "type": "boolean",
-            "default": false,
-            "description": "Format file on save"
-          },
-          "astra.build.target": {
-            "type": "string",
-            "enum": ["py", "llvm", "native"],
-            "default": "py",
-            "description": "Default build target"
-          },
-          "astra.build.profile": {
-            "type": "string",
-            "enum": ["debug", "release"],
-            "default": "debug",
-            "description": "Build profile"
-          },
-          "astra.debug.enabled": {
-            "type": "boolean",
-            "default": true,
-            "description": "Enable debugging support"
-          }
+    "configuration": {
+      "title": "Astra",
+      "properties": {
+        "astra.languageServerPath": {
+          "type": "string",
+          "default": "astlsp",
+          "description": "Path to the Astra Language Server executable"
+        },
+        "astra.enableAdvancedDiagnostics": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable advanced diagnostics and error checking"
+        },
+        "astra.formatting.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable code formatting"
+        },
+        "astra.formatting.onSave": {
+          "type": "boolean",
+          "default": false,
+          "description": "Format code on save"
+        },
+        "astra.build.target": {
+          "type": "string",
+          "enum": [
+            "py",
+            "llvm",
+            "native"
+          ],
+          "default": "py",
+          "description": "Default build target"
+        },
+        "astra.build.profile": {
+          "type": "string",
+          "enum": [
+            "debug",
+            "release"
+          ],
+          "default": "debug",
+          "description": "Default build profile"
         }
       }
-    ],
+    },
     "commands": [
       {
         "command": "astra.runFile",
@@ -126,147 +125,102 @@
       },
       {
         "command": "astra.openPlayground",
-        "title": "Open Astra Playground",
+        "title": "Open Playground",
         "category": "Astra"
+      },
+      {
+        "command": "astra.refreshExplorer",
+        "title": "Refresh Explorer",
+        "category": "Astra",
+        "icon": "$(refresh)"
       }
     ],
     "keybindings": [
       {
         "command": "astra.runFile",
         "key": "ctrl+f5",
-        "when": "editorLangId == 'astra'"
+        "when": "editorLangId == astra"
       },
       {
         "command": "astra.buildFile",
         "key": "ctrl+shift+b",
-        "when": "editorLangId == 'astra'"
+        "when": "editorLangId == astra"
       },
       {
         "command": "astra.checkFile",
         "key": "ctrl+shift+c",
-        "when": "editorLangId == 'astra'"
+        "when": "editorLangId == astra"
       },
       {
         "command": "astra.formatFile",
         "key": "ctrl+shift+i",
-        "when": "editorLangId == 'astra'"
+        "when": "editorLangId == astra"
       }
     ],
     "menus": {
       "editor/context": [
         {
+          "when": "editorLangId == astra",
           "command": "astra.runFile",
-          "when": "editorLangId == 'astra'",
-          "group": "navigation@1"
+          "group": "1_run@1"
         },
         {
+          "when": "editorLangId == astra",
           "command": "astra.buildFile",
-          "when": "editorLangId == 'astra'",
-          "group": "build@1"
+          "group": "1_run@2"
         },
         {
+          "when": "editorLangId == astra",
           "command": "astra.checkFile",
-          "when": "editorLangId == 'astra'",
-          "group": "build@2"
+          "group": "1_run@3"
         },
         {
+          "when": "editorLangId == astra",
           "command": "astra.formatFile",
-          "when": "editorLangId == 'astra'",
           "group": "1_modification@1"
         }
       ],
       "commandPalette": [
         {
-          "command": "astra.runFile",
-          "when": "editorLangId == 'astra'"
+          "when": "editorLangId == astra",
+          "command": "astra.runFile"
         },
         {
-          "command": "astra.buildFile",
-          "when": "editorLangId == 'astra'"
+          "when": "editorLangId == astra",
+          "command": "astra.buildFile"
         },
         {
-          "command": "astra.checkFile",
-          "when": "editorLangId == 'astra'"
+          "when": "editorLangId == astra",
+          "command": "astra.checkFile"
         },
         {
-          "command": "astra.formatFile",
-          "when": "editorLangId == 'astra'"
+          "when": "editorLangId == astra",
+          "command": "astra.formatFile"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "astra.refreshExplorer",
+          "when": "view == astraExplorer",
+          "group": "navigation"
         }
       ]
     },
-    "debuggers": [
-      {
-        "type": "astra",
-        "label": "Astra Debug",
-        "program": "./out/debugAdapter.js",
-        "runtime": "node",
-        "configurationAttributes": {
-          "launch": {
-            "required": ["program"],
-            "properties": {
-              "program": {
-                "type": "string",
-                "description": "Path to the Astra file to debug",
-                "default": "${workspaceFolder}/${command:AskForTestName}"
-              },
-              "args": {
-                "type": "array",
-                "description": "Command line arguments",
-                "default": []
-              },
-              "cwd": {
-                "type": "string",
-                "description": "Working directory",
-                "default": "${workspaceFolder}"
-              },
-              "target": {
-                "type": "string",
-                "enum": ["py", "llvm", "native"],
-                "description": "Build target",
-                "default": "py"
-              },
-              "stopOnEntry": {
-                "type": "boolean",
-                "description": "Stop on entry",
-                "default": false
-              }
-            }
-          }
-        },
-        "initialConfigurations": [
-          {
-            "type": "astra",
-            "request": "launch",
-            "name": "Debug Astra File",
-            "program": "${workspaceFolder}/${input:fileName}",
-            "target": "py"
-          }
-        ],
-        "inputs": [
-          {
-            "id": "fileName",
-            "description": "Select Astra file",
-            "default": "main.astra",
-            "type": "promptString"
-          }
-        ]
-      }
-    ],
     "views": {
-      "explorer": [
+      "astraExplorer": [
         {
           "id": "astraExplorer",
-          "name": "Astra",
-          "when": "workspaceFolderCount > 0"
+          "name": "Astra Files",
+          "when": "workspaceContains:**/*.astra"
         }
       ]
     },
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "astra",
+          "id": "astraExplorer",
           "title": "Astra",
-          "icon": "$(file-code)"
+          "icon": "$(symbol-misc)"
         }
       ]
     }
@@ -286,10 +240,9 @@
     "@typescript-eslint/parser": "^6.13.0",
     "eslint": "^8.54.0",
     "typescript": "^5.3.0",
-    "@vscode/test-electron": "^2.3.8"
+    "vscode-languageclient": "^9.0.1"
   },
   "dependencies": {
-    "vscode-languageclient": "^9.0.1",
-    "vscode-debugadapter": "^1.64.0"
+    "vscode-languageclient": "^9.0.1"
   }
 }
