@@ -61,6 +61,7 @@ tests/test_golden_helpers.py
 tests/test_heavy_coverage_matrix.py
 tests/test_layout_dynamic_int.py
 tests/test_lexer.py
+tests/test_mega_demo.py
 tests/test_metamorphic_runtime.py
 tests/test_module_resolver.py
 tests/test_optimizer_edges.py

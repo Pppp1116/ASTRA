@@ -239,6 +239,17 @@ def lex(src: str, filename: str = "<input>") -> list[Token]:
                     j += 1
                     j, frac_valid = _scan_digits_with_separators(src, j, base=10)
                     valid = valid and frac_valid
+                # Handle scientific notation (e/E) for both INT and FLOAT
+                if kind in {"INT", "FLOAT"} and j < len(src) and src[j] in {"e", "E"}:
+                    kind = "FLOAT"
+                    j += 1
+                    # Handle optional + or - after e/E
+                    if j < len(src) and src[j] in {"+", "-"}:
+                        j += 1
+                    # Must have at least one digit after e/E
+                    exp_start = j
+                    j, exp_valid = _scan_digits_with_separators(src, j, base=10)
+                    valid = valid and exp_valid and (j > exp_start)
             text = src[i:j]
             if valid:
                 out.append(Token(kind, text, start_i, start_line, start_col))

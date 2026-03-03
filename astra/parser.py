@@ -484,7 +484,6 @@ class Parser:
                 dots_tok = self.toks[self.i - 1]
                 inclusive = bool(self.opt("="))
                 end_expr = self.parse_expr()
-                body = self.parse_block()
                 idx_name = ident.text
                 init = LetStmt(idx_name, start_expr, True, None, ident.pos, ident.line, ident.col)
                 cond = Binary(

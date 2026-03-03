@@ -987,13 +987,20 @@ def analyze(
         fn_groups: dict[str, list[FnDecl | ExternFnDecl]] = {}
         structs: dict[str, StructDecl] = {}
         enums: dict[str, EnumDecl] = {}
+        global_scope: dict[str, str] = {}
         for item in prog.items:
             try:
                 if isinstance(item, ImportDecl):
                     try:
-                        resolve_import_path(item, filename)
+                        resolved_path = resolve_import_path(item, filename)
                     except ModuleResolutionError as err:
                         raise SemanticError(_diag(filename, item.line, item.col, str(err))) from err
+                    
+                    # Add import alias to global scope if present
+                    if item.alias:
+                        # For now, we'll add a placeholder for the imported module
+                        # In a full implementation, this would load the module symbols
+                        global_scope[item.alias] = f"module:{item.path[-1]}"
                     continue
                 if isinstance(item, StructDecl):
                     for _, field_ty in item.fields:
@@ -1046,7 +1053,7 @@ def analyze(
                 if isinstance(fn, ExternFnDecl):
                     continue
                 try:
-                    _analyze_fn(fn, fn_groups, structs, enums, filename)
+                    _analyze_fn(fn, fn_groups, structs, enums, filename, global_scope)
                 except SemanticError as err:
                     _record(err)
                     continue
@@ -1062,6 +1069,7 @@ def _analyze_fn(
     structs: dict[str, StructDecl],
     enums: dict[str, EnumDecl],
     filename: str,
+    global_scope: dict[str, str],
 ):
     for pname, pty in fn.params:
         _require_sized_value_type(filename, fn.line, fn.col, pty, f"parameter {pname}")
@@ -1069,7 +1077,7 @@ def _analyze_fn(
     ref_param_names = {pname for pname, pty in fn.params if _is_ref_type(pty)}
     if _is_ref_type(fn.ret) and not ref_param_names:
         raise SemanticError(_diag(filename, fn.line, fn.col, f"function {fn.name} returns a reference but has no reference parameter to tie its lifetime"))
-    scopes: list[dict[str, str]] = [{n: t for n, t in fn.params}]
+    scopes: list[dict[str, str]] = [global_scope, {n: t for n, t in fn.params}]
     fixed_scopes: list[dict[str, bool]] = [{n: False for n, _ in fn.params}]
     owned = _OwnedState()
     borrow = _BorrowState()
@@ -1768,8 +1776,10 @@ def _infer(
         return _typed(e, "Any")
     if isinstance(e, FieldExpr):
         obj_ty = _infer(e.obj, scopes, fixed_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok)
-        if obj_ty in structs:
-            for fname, fty in structs[obj_ty].fields:
+        # Strip reference types to get the underlying struct type
+        base_ty = _strip_ref(obj_ty)
+        if base_ty in structs:
+            for fname, fty in structs[base_ty].fields:
                 if fname == e.field:
                     return _typed(e, fty)
         return _typed(e, "Any")

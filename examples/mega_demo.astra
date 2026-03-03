@@ -3,7 +3,7 @@
 // Uses: Int/Bool/Float, structs, arrays, while/for, match, Option??, defer,
 // comptime, list/map, Any, JSON, hashing, monotonic clock, file IO, String printing.
 
-import std.io;
+import std.io as io;
 
 // time helper
 fn ms() -> Int { return __monotonic_ms(); }
@@ -23,7 +23,7 @@ fn stats_new() -> Stats {
 }
 
 fn stats_add(s: &mut Stats, x: Float) -> Void {
-  s.n += 1;
+  s.n = (s.n as Int) + 1;
   s.sum = s.sum + x;
   s.sumsq = s.sumsq + (x * x);
   if x < s.min { s.min = x; }
@@ -31,14 +31,14 @@ fn stats_add(s: &mut Stats, x: Float) -> Void {
   return;
 }
 
-fn stats_mean(s: Stats) -> Float {
+fn stats_mean(s: &Stats) -> Float {
   if s.n == 0 { return 0.0; }
   return s.sum / (s.n as Float);
 }
 
 fn stats_var(s: Stats) -> Float {
   if s.n == 0 { return 0.0; }
-  let m = stats_mean(s);
+  let m = stats_mean(&s);
   // population variance: E[x^2] - (E[x])^2
   return (s.sumsq / (s.n as Float)) - (m * m);
 }
@@ -75,13 +75,11 @@ fn cfg_load(path: String) -> Config {
   let d = cfg_default();
 
   // hosted IO: if file missing/empty => default JSON
-  let text = std.io.read_or(path, __to_json(__map_new())); // "{}"
-  let any = __from_json(text);
+  let text = io.read_or(path, __to_json(__map_new())); // "{}"
+  let any = __from_json(text as String);
 
   // If config file isn't a map, fallback
   if __to_json(any)[0] != 123 { // '{' == 123
-    return d;
-  }
 
   let seed = cfg_get_int(any, "seed", d.seed);
   let n    = cfg_get_int(any, "n", d.n);
@@ -206,7 +204,7 @@ fn main() -> Int {
 
   // Emit JSON to file + stdout
   let json = __to_json(report);
-  std.io.write(cfg.out, json);
+  io.write(cfg.out, json);
   print(json);
 
   // return small deterministic code based on histogram bucket 0 (tests cast/map_get)

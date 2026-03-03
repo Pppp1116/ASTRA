@@ -89,7 +89,7 @@ fn main() -> Int {
 def test_missing_import_is_semantic_error():
     src = "import nope::missing; fn main() -> Int { return 0; }"
     try:
-        analyze(parse(src), filename="/tmp/input.astra")
+        analyze(parse(src), filename="tmp/input.astra")
         assert False
     except SemanticError as e:
         assert "cannot resolve import" in str(e)
@@ -642,7 +642,7 @@ def test_slice_get_returns_option_type():
 
 
 def test_owned_internal_use_after_free_reports_exact_location():
-    filename = "/tmp/owned_use_after_free.astra"
+    filename = "tmp/owned_use_after_free.astra"
     src = (
         "fn main() -> Int {\n"
         "  let p = alloc(8);\n"
@@ -655,11 +655,11 @@ def test_owned_internal_use_after_free_reports_exact_location():
         analyze(parse(src, filename=filename), filename=filename)
         assert False
     except SemanticError as e:
-        assert str(e) == "SEM /tmp/owned_use_after_free.astra:4:8: use-after-free of p"
+        assert str(e) == "SEM tmp/owned_use_after_free.astra:4:8: use-after-free of p"
 
 
 def test_owned_internal_use_after_move_reports_exact_location():
-    filename = "/tmp/owned_use_after_move.astra"
+    filename = "tmp/owned_use_after_move.astra"
     src = (
         "fn main() -> Int {\n"
         "  let p = alloc(8);\n"
@@ -672,11 +672,11 @@ def test_owned_internal_use_after_move_reports_exact_location():
         analyze(parse(src, filename=filename), filename=filename)
         assert False
     except SemanticError as e:
-        assert str(e) == "SEM /tmp/owned_use_after_move.astra:4:11: use-after-move of p"
+        assert str(e) == "SEM tmp/owned_use_after_move.astra:4:11: use-after-move of p"
 
 
 def test_owned_internal_reassignment_leak_reports_exact_location():
-    filename = "/tmp/owned_reassign_leak.astra"
+    filename = "tmp/owned_reassign_leak.astra"
     src = (
         "fn main() -> Int {\n"
         "  let p = alloc(8);\n"
@@ -689,7 +689,7 @@ def test_owned_internal_reassignment_leak_reports_exact_location():
         assert False
     except SemanticError as e:
         assert str(e) == (
-            "SEM /tmp/owned_reassign_leak.astra:3:3: "
+            "SEM tmp/owned_reassign_leak.astra:3:3: "
             "reassignment would leak owned allocation in p; free or move it first"
         )
 
