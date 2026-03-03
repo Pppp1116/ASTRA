@@ -1886,6 +1886,8 @@ def _compile_call(ctx: _ModuleCtx, state: _FnState, call: Call, overflow_mode: s
 
 def _compile_expr(ctx: _ModuleCtx, state: _FnState, e: Any, overflow_mode: str = "trap") -> _Value:
     b = state.builder
+    if isinstance(e, WildcardPattern):
+        raise CodegenError(_diag(e, "wildcard pattern `_` is only valid in match arms"))
     if isinstance(e, BoolLit):
         return _Value(ir.Constant(ir.IntType(1), 1 if e.value else 0), "Bool")
     if isinstance(e, NilLit):
@@ -2715,16 +2717,19 @@ def _compile_stmt(ctx: _ModuleCtx, state: _FnState, st: Any, overflow_mode: str)
         subj = _compile_expr(ctx, state, st.expr, overflow_mode=overflow_mode)
         cur_check = state.builder.block
         for i, (pat, body) in enumerate(st.arms):
-            arm_block = fn.append_basic_block(f"match_arm_{i}")
-            next_block = fn.append_basic_block(f"match_next_{i}")
             state.builder.position_at_end(cur_check)
-            pv = _compile_expr(ctx, state, pat, overflow_mode=overflow_mode)
-            pvv = _coerce_value(ctx, state, pv.value, pv.ty, subj.ty, pat)
-            if isinstance(subj.value.type, (ir.FloatType, ir.DoubleType)):
-                cmpv = state.builder.fcmp_ordered("==", subj.value, pvv)
+            arm_block = fn.append_basic_block(f"match_arm_{i}")
+            if isinstance(pat, WildcardPattern):
+                state.builder.branch(arm_block)
             else:
-                cmpv = state.builder.icmp_unsigned("==", subj.value, pvv)
-            state.builder.cbranch(cmpv, arm_block, next_block)
+                next_block = fn.append_basic_block(f"match_next_{i}")
+                pv = _compile_expr(ctx, state, pat, overflow_mode=overflow_mode)
+                pvv = _coerce_value(ctx, state, pv.value, pv.ty, subj.ty, pat)
+                if isinstance(subj.value.type, (ir.FloatType, ir.DoubleType)):
+                    cmpv = state.builder.fcmp_ordered("==", subj.value, pvv)
+                else:
+                    cmpv = state.builder.icmp_unsigned("==", subj.value, pvv)
+                state.builder.cbranch(cmpv, arm_block, next_block)
 
             state.builder.position_at_end(arm_block)
             for sub in body:
@@ -2733,11 +2738,15 @@ def _compile_stmt(ctx: _ModuleCtx, state: _FnState, st: Any, overflow_mode: str)
                     break
             if not _is_terminated(state):
                 state.builder.branch(end_block)
+            if isinstance(pat, WildcardPattern):
+                cur_check = None
+                break
             cur_check = next_block
 
-        state.builder.position_at_end(cur_check)
-        if not _is_terminated(state):
-            state.builder.branch(end_block)
+        if cur_check is not None:
+            state.builder.position_at_end(cur_check)
+            if not _is_terminated(state):
+                state.builder.branch(end_block)
         state.builder.position_at_end(end_block)
         return
 

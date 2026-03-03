@@ -1,4 +1,0 @@
-# file: /home/pedro/Downloads/programming-language-/astra/build.py
-# hypothesis_version: 6.151.9
-
-[1024, '!', '!=', '%', '%=', '&', '&&', '&mut', '*', '*=', '+', '+=', ',', '-', '-=', '-felf64', '-o', '.astra', '.astra-cache.json', '.py', '/', '/=', ':', '; ', '<', '<=', '=', '==', '>', '>=', '??', 'astra', 'astra-native-', 'built', 'cached', 'emit_ir', 'freestanding', 'inputs', 'ld', 'module.o', 'module.s', 'name', 'nasm', 'native', 'ops', 'path', 'py', 'rb', 'runtime', 'runtime.o', 'sha256', 'src', 'stdlib', 'strict', 'target', 'toolchain', 'x86_64', '||', '~']

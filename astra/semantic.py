@@ -1488,12 +1488,24 @@ def _check_stmt(
     if isinstance(st, MatchStmt):
         subject_ty = _infer(st.expr, scopes, fixed_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok)
         seen_bool: set[bool] = set()
-        for pat, body in st.arms:
-            pty = _infer(pat, scopes, fixed_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok)
-            if subject_ty != "Any":
-                _require_type(filename, st.line, st.col, subject_ty, pty, "match pattern")
-            if isinstance(pat, BoolLit):
-                seen_bool.add(pat.value)
+        seen_wildcard = False
+        for idx, (pat, body) in enumerate(st.arms):
+            if isinstance(pat, WildcardPattern):
+                if seen_wildcard:
+                    raise SemanticError(_diag(filename, pat.line, pat.col, "duplicate wildcard match arm"))
+                if idx != len(st.arms) - 1:
+                    raise SemanticError(_diag(filename, pat.line, pat.col, "wildcard match arm must be last"))
+                seen_wildcard = True
+                pty = subject_ty
+            else:
+                pty = _infer(pat, scopes, fixed_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok)
+                if subject_ty != "Any":
+                    _require_type(filename, st.line, st.col, subject_ty, pty, "match pattern")
+                if isinstance(pat, BoolLit):
+                    if pat.value in seen_bool:
+                        value_text = "true" if pat.value else "false"
+                        raise SemanticError(_diag(filename, pat.line, pat.col, f"duplicate Bool match arm for {value_text}"))
+                    seen_bool.add(pat.value)
             arm_scopes = scopes + [{}]
             arm_fixed_scopes = fixed_scopes + [{}]
             arm_borrow_scopes = borrow_scopes + [set()]
@@ -1517,7 +1529,7 @@ def _check_stmt(
                 loop_depth,
                 unsafe_ok,
             )
-        if subject_ty == "Bool" and seen_bool != {True, False}:
+        if subject_ty == "Bool" and not seen_wildcard and seen_bool != {True, False}:
             raise SemanticError(_diag(filename, st.line, st.col, "non-exhaustive match for Bool"))
         return
     if isinstance(st, ExprStmt):
@@ -1557,6 +1569,8 @@ def _infer(
     fn_name: str,
     unsafe_ok: bool,
 ):
+    if isinstance(e, WildcardPattern):
+        raise SemanticError(_diag(filename, e.line, e.col, "wildcard pattern `_` is only valid in match arms"))
     if isinstance(e, BoolLit):
         return _typed(e, "Bool")
     if isinstance(e, NilLit):

@@ -72,3 +72,10 @@ def test_invalid_separator_literals_emit_lex_error():
     errs = [t for t in toks if t.kind == "ERROR"]
     assert len(errs) >= 3
     assert all("invalid numeric literal" in t.text for t in errs)
+
+
+def test_lexes_multiline_string_literal():
+    src = 'fn main() -> Int { let s = """a\nb"""; return 0; }'
+    toks = lex(src)
+    kinds = [t.kind for t in toks]
+    assert "STR_MULTI" in kinds

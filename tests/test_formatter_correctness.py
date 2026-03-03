@@ -38,6 +38,7 @@ def _normalize(node):
         "fn main() -> Int { return await (a + b); }",
         'fn main() -> Int { defer print("bye"); return 0; }',
         "fn main() -> Int { comptime { let x = 1; } return 0; }",
+        "fn main() -> Int { let mut s = 0; for i in 1..=3 { s += i; } match s == 6 { true => { return 1; } _ => { return 0; } } }",
     ],
 )
 def test_formatter_idempotent_and_structural_for_precedence_cases(src: str):

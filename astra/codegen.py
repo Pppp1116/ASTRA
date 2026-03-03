@@ -443,6 +443,8 @@ def _expr(e: Any) -> str:
         return repr(e.value)
     if isinstance(e, Name):
         return e.value
+    if isinstance(e, WildcardPattern):
+        raise CodegenError(_diag(e, "wildcard pattern `_` is only valid in match arms"))
     if isinstance(e, AwaitExpr):
         return f"await_result({_expr(e.expr)})"
     if isinstance(e, CastExpr):
@@ -562,15 +564,24 @@ def _stmt_py(st: Any, ind: int) -> list[str]:
         return lines
     if isinstance(st, MatchStmt):
         lines = [f"{p}__match_value_{ind} = {_expr(st.expr)}"]
+        has_wildcard = False
         for idx, (pat, body) in enumerate(st.arms):
-            head = "if" if idx == 0 else "elif"
-            lines.append(f"{p}{head} __match_value_{ind} == {_expr(pat)}:")
+            if isinstance(pat, WildcardPattern):
+                has_wildcard = True
+                head = "if" if idx == 0 else "else"
+                if head == "if":
+                    lines.append(f"{p}if True:")
+                else:
+                    lines.append(f"{p}else:")
+            else:
+                head = "if" if idx == 0 else "elif"
+                lines.append(f"{p}{head} __match_value_{ind} == {_expr(pat)}:")
             if body:
                 for s in body:
                     lines.extend(_stmt_py(s, ind + 1))
             else:
                 lines.append(f"{'    ' * (ind + 1)}pass")
-        if st.arms:
+        if st.arms and not has_wildcard:
             lines.append(f"{p}else:")
             lines.append(f"{'    ' * (ind + 1)}pass")
         return lines
