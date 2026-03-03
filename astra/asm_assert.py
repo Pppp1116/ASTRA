@@ -49,13 +49,28 @@ def assert_valid_llvm_ir(ir_text: str, *, triple: str | None = None, workdir: Pa
         "FIXME: placeholder",
         "INCOMPLETE IMPLEMENTATION",
         "NOT YET IMPLEMENTED",
+        # Include lowercase variants to prevent silent passing
+        "unimplemented",
+        "not implemented",
+        "placeholder",
+        "stub",
+        "fixme: runtime",
+        "todo: runtime",
+        "todo: implement",
+        "todo: unimplemented",
+        "todo: placeholder",
+        "todo: stub",
+        "fixme: unimplemented",
+        "fixme: placeholder",
+        "incomplete implementation",
+        "not yet implemented",
         # Avoid common comment words that appear in legitimate code/debug info
     ]
     # Use case-insensitive search for broader detection
     text_lower = text.lower()
     for pattern in incomplete_patterns:
         if pattern.lower() in text_lower:
-            assert False, f"LLVM IR contains incomplete implementation: {pattern}"
+            raise AssertionError(f"LLVM IR contains incomplete implementation: {pattern}")
     if triple:
         assert triple in text, f"missing module triple {triple!r}"
 
@@ -75,4 +90,5 @@ def assert_valid_llvm_ir(ir_text: str, *, triple: str | None = None, workdir: Pa
         obj = Path(td) / "module.o"
         ll.write_text(ir_text)
         cp = subprocess.run([clang, "-c", str(ll), "-o", str(obj)], capture_output=True, text=True)
-        assert cp.returncode == 0, f"clang failed to compile LLVM IR: {cp.stderr or cp.stdout}"
+        if cp.returncode != 0:
+            raise AssertionError(f"clang failed to compile LLVM IR: {cp.stderr or cp.stdout}")

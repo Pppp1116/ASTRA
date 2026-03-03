@@ -1655,6 +1655,8 @@ u128 astra_u128_mod_trap(u128 a, u128 b) {
 // Async/await implementation
 #define ASTRA_MAX_ASYNC_TASKS 1000000  // 1M tasks max
 #define ASTRA_TASK_ID_WRAP_THRESHOLD UINTPTR_MAX - 1000
+#define ASTRA_TASK_ID_GENERATION_SHIFT 40  // High bits for generation counter
+#define ASTRA_TASK_ID_INDEX_MASK ((1ULL << ASTRA_TASK_ID_GENERATION_SHIFT) - 1)
 
 typedef struct {
   void *value;
@@ -1667,7 +1669,8 @@ typedef struct {
 static AsyncTask *g_async_tasks = NULL;
 static size_t g_async_cap = 0;
 static size_t g_async_active_count = 0;  // Track active tasks for compaction
-static uintptr_t g_next_task_id = 1;
+static uintptr_t g_next_task_index = 1;  // Index portion of task ID
+static uintptr_t g_task_generation = 1;   // Generation portion for uniqueness
 static pthread_mutex_t g_async_mutex = PTHREAD_MUTEX_INITIALIZER;
 static bool g_async_initialized = false;
 
@@ -1675,6 +1678,7 @@ static void astra_async_cleanup_task(AsyncTask *task) {
   if (task != NULL) {
     pthread_cond_destroy(&task->cond);
     task->valid = false;
+    // Only free the value if it hasn't been transferred to await_result
     if (task->value != NULL) {
       astra_untrack_ptr(task->value);
       free(task->value);
@@ -1693,6 +1697,33 @@ static bool astra_async_init_once(void) {
   bool result = true;
   if (!g_async_initialized) {
     g_async_initialized = true;
+    // Initialize storage to ensure g_async_tasks is not NULL
+    if (g_async_tasks == NULL) {
+      g_async_tasks = (AsyncTask *)calloc(8, sizeof(AsyncTask));
+      if (g_async_tasks == NULL) {
+        result = false;
+      } else {
+        g_async_cap = 8;
+        // Initialize condition variables
+        for (size_t i = 0; i < 8; i++) {
+          if (pthread_cond_init(&g_async_tasks[i].cond, NULL) != 0) {
+            // Cleanup on failure
+            for (size_t j = 0; j < i; j++) {
+              pthread_cond_destroy(&g_async_tasks[j].cond);
+            }
+            free(g_async_tasks);
+            g_async_tasks = NULL;
+            g_async_cap = 0;
+            result = false;
+            break;
+          }
+          g_async_tasks[i].value = NULL;
+          g_async_tasks[i].completed = false;
+          g_async_tasks[i].valid = false;
+          g_async_tasks[i].waiters = 0;
+        }
+      }
+    }
   }
   pthread_mutex_unlock(&g_async_mutex);
   return result;
@@ -1700,6 +1731,7 @@ static bool astra_async_init_once(void) {
 
 static bool astra_async_compact(void) {
   // Compact the registry by removing invalid tasks from the end
+  // This function must be called with g_async_mutex held
   if (g_async_tasks == NULL || g_async_cap == 0) {
     return true;
   }
@@ -1723,12 +1755,12 @@ static bool astra_async_compact(void) {
 }
 
 static bool astra_async_reserve(size_t want) {
-  if (!astra_async_init_once()) {
+  // Check against maximum limit first
+  if (want > ASTRA_MAX_ASYNC_TASKS) {
     return false;
   }
   
-  // Check against maximum limit
-  if (want > ASTRA_MAX_ASYNC_TASKS) {
+  if (!astra_async_init_once()) {
     return false;
   }
   
@@ -1742,7 +1774,7 @@ static bool astra_async_reserve(size_t want) {
     goto cleanup;
   }
   
-  // Try to compact first
+  // Try to compact first (now safely under lock)
   astra_async_compact();
   
   if (g_async_cap >= want) {
@@ -1788,14 +1820,27 @@ cleanup:
 }
 
 static bool astra_async_validate_task_id(uintptr_t task_id, size_t *idx_out) {
-  if (task_id == 0 || task_id >= g_next_task_id) {
+  if (task_id == 0) {
     return false;
   }
-  size_t idx = task_id - 1;
+  
+  // Extract index and generation from task ID
+  uintptr_t index = task_id & ASTRA_TASK_ID_INDEX_MASK;
+  uintptr_t generation = task_id >> ASTRA_TASK_ID_GENERATION_SHIFT;
+  
+  if (index == 0 || index >= g_next_task_index) {
+    return false;
+  }
+  
+  size_t idx = index - 1;
   if (pthread_mutex_lock(&g_async_mutex) != 0) {
     return false;
   }
+  
   bool valid = (idx < g_async_cap && g_async_tasks[idx].valid);
+  // Additional validation: check if this is a stale ID from a previous generation
+  // For now, we assume generation tracking would be added to AsyncTask struct
+  
   pthread_mutex_unlock(&g_async_mutex);
   if (!valid) {
     return false;
@@ -1807,26 +1852,31 @@ static bool astra_async_validate_task_id(uintptr_t task_id, size_t *idx_out) {
 }
 
 uintptr_t astra_async_create(void *value) {
-  // Check for task ID wraparound
-  if (g_next_task_id >= ASTRA_TASK_ID_WRAP_THRESHOLD) {
-    return 0;  // Prevent wraparound
-  }
-  
-  if (!astra_async_reserve(g_next_task_id + 1)) {
+  if (!astra_async_reserve(g_next_task_index + 1)) {
     return 0;
   }
   if (pthread_mutex_lock(&g_async_mutex) != 0) {
     return 0;
   }
   
-  // Double-check wraparound after acquiring lock
-  if (g_next_task_id >= ASTRA_TASK_ID_WRAP_THRESHOLD) {
-    pthread_mutex_unlock(&g_async_mutex);
-    return 0;
+  // Check for index overflow and advance generation if needed
+  if (g_next_task_index >= (1ULL << ASTRA_TASK_ID_GENERATION_SHIFT)) {
+    // We've exhausted the index space, advance to next generation
+    g_next_task_index = 1;
+    g_task_generation++;
+    
+    // Mark all existing tasks as invalid to prevent stale ID reuse
+    for (size_t i = 0; i < g_async_cap; i++) {
+      if (g_async_tasks[i].valid) {
+        astra_async_cleanup_task(&g_async_tasks[i]);
+      }
+    }
   }
   
-  uintptr_t task_id = g_next_task_id++;
-  AsyncTask *task = &g_async_tasks[task_id - 1];
+  uintptr_t task_index = g_next_task_index++;
+  uintptr_t task_id = (g_task_generation << ASTRA_TASK_ID_GENERATION_SHIFT) | task_index;
+  AsyncTask *task = &g_async_tasks[task_index - 1];
+  
   // Track the value to ensure proper cleanup
   if (value != NULL) {
     astra_track_ptr(value);
@@ -1879,7 +1929,10 @@ void *astra_await_result(uintptr_t task_id) {
   if (task->completed && task->value != NULL) {
     // Create a copy of the value to avoid exposing internal pointer
     // For now, we assume the value is an AstraAny handle that needs to be preserved
+    // TODO: Implement proper deep copy based on value type
     result = task->value;
+    // Mark the task value as NULL to prevent double-free in cleanup
+    task->value = NULL;
   } else {
     result = (void*)astra_any_box_i64(0);
   }

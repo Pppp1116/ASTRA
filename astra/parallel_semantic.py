@@ -18,6 +18,9 @@ from astra.parallel import ParallelExecutor, WorkItem, DeterministicMerge
 from astra.profiler import profiler
 from astra.semantic import SemanticError, _analyze_fn, _FREESTANDING_MODE_STACK
 
+# Global lock to protect the freestanding mode stack during parallel execution
+_FREESTANDING_STACK_LOCK = threading.Lock()
+
 
 @dataclass
 class SemanticWorkItem:
@@ -51,42 +54,30 @@ def analyze_function_parallel(work_item: SemanticWorkItem) -> ThreadLocalDiagnos
     """
     diagnostics = ThreadLocalDiagnostics()
     
-    # Use thread-local stack to avoid race conditions with global shared stack
-    import threading
-    thread_local = threading.local()
-    
-    # Initialize thread-local stack if not exists
-    if not hasattr(thread_local, 'freestanding_stack'):
-        thread_local.freestanding_stack = []
-    
-    # Use thread-local stack instead of global shared stack
-    thread_local.freestanding_stack.append(work_item.freestanding)
-    
-    # Temporarily replace global stack for this thread (for compatibility)
-    original_stack = _FREESTANDING_MODE_STACK[:]
-    _FREESTANDING_MODE_STACK.clear()
-    _FREESTANDING_MODE_STACK.extend(thread_local.freestanding_stack)
-    
-    try:
-        _analyze_fn(
-            work_item.fn_decl,
-            work_item.fn_groups,
-            work_item.structs,
-            work_item.enums,
-            work_item.file_path,
-            work_item.global_scope
-        )
-    except SemanticError as e:
-        diagnostics.add_error(str(e))
-    except Exception as e:
-        diagnostics.add_error(f"INTERNAL {work_item.file_path}:{work_item.fn_decl.line}:{work_item.fn_decl.col}: {e}")
-    finally:
-        # Restore original global stack
-        _FREESTANDING_MODE_STACK.clear()
-        _FREESTANDING_MODE_STACK.extend(original_stack)
-        # Clean up thread-local stack
-        if thread_local.freestanding_stack:
-            thread_local.freestanding_stack.pop()
+    # Use global lock to protect the freestanding mode stack during parallel execution
+    with _FREESTANDING_STACK_LOCK:
+        # Save current stack state
+        original_stack = _FREESTANDING_MODE_STACK[:]
+        
+        try:
+            # Set up stack for this work item
+            _FREESTANDING_MODE_STACK.clear()
+            _FREESTANDING_MODE_STACK.append(work_item.freestanding)
+            
+            _analyze_fn(
+                work_item.fn_decl,
+                work_item.fn_groups,
+                work_item.structs,
+                work_item.enums,
+                work_item.file_path,
+                work_item.global_scope
+            )
+        except Exception as e:
+            diagnostics.add_error(f"INTERNAL {work_item.file_path}:{work_item.fn_decl.line}:{work_item.fn_decl.col}: {e}")
+        finally:
+            # Restore original stack state
+            _FREESTANDING_MODE_STACK.clear()
+            _FREESTANDING_MODE_STACK.extend(original_stack)
     
     return diagnostics
 

@@ -40,6 +40,10 @@ pub fn sort<T>(arr: Vec<T>) -> Vec<T> {
 
 /// Binary search in sorted vector
 pub fn binary_search<T>(arr: Vec<T>, target: T) -> Int? {
+    if len(arr) == 0 {
+        return none;
+    }
+    
     let left = 0;
     let right = len(arr) - 1;
     
@@ -91,10 +95,11 @@ pub fn count<T>(arr: Vec<T>, target: T) -> Int {
 /// Reverse a vector
 pub fn reverse<T>(arr: Vec<T>) -> Vec<T> {
     let result = vec_new_typed();
-    let i = len(arr) - 1;
-    while i >= 0 {
-        vec_push_typed(result, arr[i]);
+    let len = len(arr);
+    let i = len;
+    while i > 0 {
         i = i - 1;
+        vec_push_typed(result, arr[i]);
     }
     return result;
 }

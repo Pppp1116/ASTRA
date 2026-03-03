@@ -1777,23 +1777,25 @@ def _compile_call(ctx: _ModuleCtx, state: _FnState, call: Call, overflow_mode: s
                 "map_new", "map_set", "map_get", "map_has", "map_len",
                 "str_concat", "str_len", "file_exists", "file_remove",
                 "tcp_connect", "tcp_send", "tcp_recv", "tcp_close",
-                "hash", "hex", "encode", "decode", "verify",
-                "hmac_sha256", "proc_exit", "env_get", "cwd",
-                "proc_run", "now_unix", "monotonic_ms", "sleep_ms",
-                "countOnes", "leadingZeros", "trailingZeros", "popcnt",
-                "clz", "ctz", "rotl", "rotr", "vec_new", "vec_from",
-                "vec_len", "vec_get", "vec_set", "vec_push"
+                "to_json", "from_json", "sha256", "hmac_sha256",
+                "proc_exit", "env_get", "cwd", "proc_run", "now_unix",
+                "monotonic_ms", "sleep_ms", "fmod", "countOnes", 
+                "leadingZeros", "trailingZeros", "popcnt", "clz", "ctz",
+                "rotl", "rotr", "vec_new", "vec_from", "vec_len", 
+                "vec_get", "vec_set", "vec_push"
             }:
                 # For async variants, we need to create a task and return the task ID
                 if len(call.args) != 1:
                     raise CodegenError(_diag(call, f"{resolved} expects 1 argument"))
                 int_type = _llvm_type(ctx, "Int")
-                fn = ctx.module.get_or_insert_function("astra_async_create", ir.FunctionType(int_type, [ir.IntType(8).as_pointer()]))
-                # For async variants, we need to wrap the actual function call in a lambda
-                # This is complex and would require significant changes to the compilation model
-                # For now, just create a placeholder that returns 0
-                result = state.builder.call(fn, [state.builder.null(ir.IntType(8).as_pointer())])
-                return _Value(result, "Int")
+                async_create_fn = _declare_runtime(ctx, "astra_async_create")
+                
+                # Convert the argument to Any type for async task creation
+                arg_value = _coerce_value(ctx, state, call.args[0].value, call.args[0].ty, "Any", call.args[0])
+                
+                # Create async task with the argument value
+                task_id = state.builder.call(async_create_fn, [arg_value])
+                return _Value(task_id, "Int")
 
         if resolved in {
             "print",

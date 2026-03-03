@@ -154,9 +154,14 @@ class ParallelExecutor:
                 # Add context about other errors
                 if len(self._errors) > 1:
                     first_error.args = (f"{first_error}. Additional errors: {len(self._errors)-1} more",)
+                # Clear stale state before raising
+                self._results.clear()
+                self._errors.clear()
                 raise first_error
             
             results = dict(self._results)
+            # Clear results to prevent stale state on subsequent calls
+            self._results.clear()
             return results
 
 
@@ -192,26 +197,26 @@ def parse_files_parallel(file_paths: List[Path]) -> Dict[Path, Any]:
     with ParallelExecutor() as executor:
         # Submit all parsing work
         work_items = []
-        for file_path in file_paths:
-            # Use absolute path for unique, stable IDs
-            # This ensures no collisions even with same filename in different directories
-            abs_path = file_path.resolve()
-            work_id = f"parse_{abs_path.as_posix()}"
+        for i, file_path in enumerate(file_paths):
+            # Use relative path and index for stable, non-leaking IDs
+            # This avoids leaking host paths and ensures consistency across platforms
+            rel_path = file_path.relative_to(Path.cwd()) if file_path.is_relative_to(Path.cwd()) else file_path.name
+            work_id = f"parse_{i}_{rel_path.as_posix()}"
             
             work = WorkItem(
                 id=work_id,
                 fn=lambda fp=file_path: parse_file_parallel(fp)
             )
-            work_items.append(work)
+            work_items.append((work, file_path))  # Keep mapping to original path
             executor.submit_work(work)
         
         # Wait for all to complete
-        for work in work_items:
+        for work, original_path in work_items:
             try:
                 file_path, result = executor.wait_for(work.id)
-                results[file_path] = result
+                results[original_path] = result
             except Exception as e:
-                results[file_path] = e
+                results[original_path] = e
     
     return results
 

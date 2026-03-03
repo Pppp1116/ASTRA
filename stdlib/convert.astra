@@ -17,21 +17,26 @@ pub fn parse_int_safe(s: String) -> Result<Int, String> {
     let negative = false;
     
     // Handle optional sign
-    if s[0] == '-' {
+    if len(s) > 0 && s[0] == '-' {
         negative = true;
         i = 1;
-    } else if s[0] == '+' {
+    } else if len(s) > 0 && s[0] == '+' {
         i = 1;
     }
     
     // Parse digits
     while i < len(s) {
-        let char = s[i];
-        if char >= '0' && char <= '9' {
-            let digit = (char - '0') as Int;
-            result = result * 10 + digit;
+        let char_str = s[i];
+        if len(char_str) == 1 {
+            let char = char_str[0];
+            if char >= '0' && char <= '9' {
+                let digit = (char - '0') as Int;
+                result = result * 10 + digit;
+            } else {
+                return Err("invalid character: " + char_str);
+            }
         } else {
-            return Err("invalid character: " + char);
+            return Err("invalid character");
         }
         i = i + 1;
     }
@@ -56,31 +61,44 @@ pub fn parse_float_safe(s: String) -> Result<Float, String> {
     let decimal_places = 0;
     
     // Handle optional sign
-    if s[0] == '-' {
+    if len(s) > 0 && s[0] == '-' {
         negative = true;
         i = 1;
-    } else if s[0] == '+' {
+    } else if len(s) > 0 && s[0] == '+' {
         i = 1;
     }
     
     // Parse digits
     while i < len(s) {
-        let char = s[i];
-        if char >= '0' && char <= '9' {
-            let digit = (char - '0') as Float;
-            if has_decimal {
-                decimal_places = decimal_places + 1;
-                result = result + digit / (10.0 ^ decimal_places as Float);
+        let char_str = s[i];
+        if len(char_str) == 1 {
+            let char = char_str[0];
+            if char >= '0' && char <= '9' {
+                let digit = (char - '0') as Float;
+                if has_decimal {
+                    decimal_places = decimal_places + 1;
+                    // Use multiplication instead of exponentiation
+                    let divisor = 10.0;
+                    let j = 0;
+                    let power = 1.0;
+                    while j < decimal_places {
+                        power = power * divisor;
+                        j = j + 1;
+                    }
+                    result = result + digit / power;
+                } else {
+                    result = result * 10.0 + digit;
+                }
+            } else if char == '.' {
+                if has_decimal {
+                    return Err("multiple decimal points");
+                }
+                has_decimal = true;
             } else {
-                result = result * 10.0 + digit;
+                return Err("invalid character: " + char_str);
             }
-        } else if char == '.' {
-            if has_decimal {
-                return Err("multiple decimal points");
-            }
-            has_decimal = true;
         } else {
-            return Err("invalid character: " + char);
+            return Err("invalid character");
         }
         i = i + 1;
     }
@@ -189,12 +207,15 @@ pub fn hex_to_bytes(hex: String) -> Result<Vec<u8>, String> {
 
 /// Parse single hex digit
 fn parse_hex_digit(c: String) -> Int? {
-    if c >= '0' && c <= '9' {
-        return Some((c - '0') as Int);
-    } else if c >= 'A' && c <= 'F' {
-        return Some((c - 'A' + 10) as Int);
-    } else if c >= 'a' && c <= 'f' {
-        return Some((c - 'a' + 10) as Int);
+    if len(c) == 1 {
+        let char = c[0];
+        if char >= '0' && char <= '9' {
+            return Some((char - '0') as Int);
+        } else if char >= 'A' && char <= 'F' {
+            return Some((char - 'A' + 10) as Int);
+        } else if char >= 'a' && char <= 'f' {
+            return Some((char - 'a' + 10) as Int);
+        }
     }
     return none;
 }

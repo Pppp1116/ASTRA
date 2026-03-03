@@ -6,21 +6,6 @@
 
 use core;
 
-/// SHA-256 hash result (32 bytes)
-pub struct Sha256Hash {
-    bytes: Vec<u8>,
-}
-
-/// Compute SHA-256 hash of data
-pub fn sha256(data: Vec<u8>) -> Sha256Hash {
-    return __sha256_compute(data);
-}
-
-/// Compute SHA-256 hash of string
-pub fn sha256_str(s: String) -> Sha256Hash {
-    return sha256(s.to_bytes());
-}
-
 /// Simple 32-bit hash function (deterministic)
 pub fn hash32(data: Vec<u8>) -> Int {
     let hash = 2166136261;
@@ -53,6 +38,23 @@ pub fn combine_hashes(hash1: Int, hash2: Int) -> Int {
     return hash1 ^ (hash2 + 2654435761);
 }
 
+#if !__FREESTANDING__
+
+/// SHA-256 hash result (32 bytes)
+pub struct Sha256Hash {
+    bytes: Vec<u8>,
+}
+
+/// Compute SHA-256 hash of data
+pub fn sha256(data: Vec<u8>) -> Sha256Hash {
+    return __sha256_compute(data);
+}
+
+/// Compute SHA-256 hash of string
+pub fn sha256_str(s: String) -> Sha256Hash {
+    return sha256(s.to_bytes());
+}
+
 /// MD5 hash result (16 bytes)
 pub struct Md5Hash {
     bytes: Vec<u8>,
@@ -77,3 +79,5 @@ pub fn hmac_sha256(key: Vec<u8>, data: Vec<u8>) -> Sha256Hash {
 pub fn hmac_sha256_str(key: String, data: String) -> Sha256Hash {
     return hmac_sha256(key.to_bytes(), data.to_bytes());
 }
+
+#endif // !__FREESTANDING__

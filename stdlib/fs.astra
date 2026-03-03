@@ -4,6 +4,8 @@
 /// path manipulation, and file metadata operations.
 /// This module is hosted-only as it requires OS filesystem access.
 
+#if !__FREESTANDING__
+
 use std.io;
 use std.str;
 
@@ -146,3 +148,5 @@ pub fn remove_all(path: String) -> Int {
     }
     return remove(path);
 }
+
+#endif // !__FREESTANDING__

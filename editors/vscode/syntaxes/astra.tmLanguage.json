@@ -1,0 +1,161 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Astra",
+  "scopeName": "source.astra",
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#keywords"
+    },
+    {
+      "include": "#types"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#numbers"
+    },
+    {
+      "include": "#operators"
+    },
+    {
+      "include": "#functions"
+    },
+    {
+      "include": "#variables"
+    }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.astra",
+          "begin": "//",
+          "end": "$"
+        },
+        {
+          "name": "comment.block.astra",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.astra",
+          "match": "\\b(fn|let|mut|return|if|else|while|for|break|continue|struct|enum|type|import|pub|extern|async|await|unsafe|match|drop|defer|none)\\b"
+        },
+        {
+          "name": "storage.type.astra",
+          "match": "\\b(Void|Never|Bool|Int|isize|usize|Float|String|str|Any)\\b"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "entity.name.type.astra",
+          "match": "\\b[A-Z][a-zA-Z0-9_]*\\b"
+        },
+        {
+          "name": "storage.type.generic.astra",
+          "match": "\\b(Vec|Option)\\b"
+        },
+        {
+          "name": "punctuation.generic.astra",
+          "match": "<|>"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.astra",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.astra",
+              "match": "\\\\."
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.single.astra",
+          "begin": "'",
+          "end": "'",
+          "patterns": [
+            {
+              "name": "constant.character.escape.astra",
+              "match": "\\\\."
+            }
+          ]
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.integer.astra",
+          "match": "\\b\\d+(u?\\d+|i\\d+)?\\b"
+        },
+        {
+          "name": "constant.numeric.float.astra",
+          "match": "\\b\\d+\\.\\d*([eE][+-]?\\d+)?[fFdD]?\\b"
+        },
+        {
+          "name": "constant.numeric.hex.astra",
+          "match": "\\b0[xX][0-9a-fA-F]+\\b"
+        },
+        {
+          "name": "constant.numeric.binary.astra",
+          "match": "\\b0[bB][01]+\\b"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.astra",
+          "match": "\\+|\\-|\\*|/|%|\\^|&|\\||~|!|=|==|!=|<|>|<=|>=|&&|\\|\\||\\?\\?|=>|::|:|;|,|\\."
+        },
+        {
+          "name": "keyword.operator.assignment.astra",
+          "match": "\\+=|\\-=|\\*=|/=|%=|\\^=|&=|\\|=|<<=|>>="
+        }
+      ]
+    },
+    "functions": {
+      "patterns": [
+        {
+          "name": "entity.name.function.astra",
+          "match": "\\b[a-z_][a-zA-Z0-9_]*\\s*(?=\\()"
+        },
+        {
+          "name": "punctuation.parenthesis.astra",
+          "match": "\\(|\\)"
+        },
+        {
+          "name": "punctuation.bracket.astra",
+          "match": "\\[|\\]"
+        },
+        {
+          "name": "punctuation.brace.astra",
+          "match": "\\{|\\}"
+        }
+      ]
+    },
+    "variables": {
+      "patterns": [
+        {
+          "name": "variable.other.astra",
+          "match": "\\b[a-z_][a-zA-Z0-9_]*\\b"
+        }
+      ]
+    }
+  }
+}

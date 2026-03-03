@@ -317,6 +317,15 @@ class FieldExpr:
 
 
 @dataclass
+class ModuleAccessExpr:
+    obj: Any
+    module: str
+    pos: int = 0
+    line: int = 0
+    col: int = 0
+
+
+@dataclass
 class ArrayLit:
     elements: list[Any]
     pos: int = 0

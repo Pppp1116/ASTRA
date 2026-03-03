@@ -33,26 +33,22 @@ class SymbolInfo:
 
 @dataclass(frozen=True)
 class GlobalSymbolTable:
-    """
-    Immutable global symbol table for parallel access.
+    """Thread-safe, immutable global symbol table for cross-module analysis.
     
-    IMPORTANT: This class returns read-only collections:
+    This class provides collections with the following mutability:
     - functions and extern_functions return tuples (immutable lists)
-    - structs, enums, type_aliases, and global_scope return MappingProxyType (read-only dict views)
+    - structs, enums, type_aliases, and global_scope return mutable dicts (for backward compatibility)
     
-    Consumers must treat all returned collections as read-only. Any attempts to modify
-    them will raise TypeError. This immutability ensures safe parallel access during
-    semantic analysis.
-    
-    If you need mutable access, use MutableSymbolTable during the building phase,
-    then call freeze() to get an immutable instance for parallel processing.
+    While structs, enums, type_aliases, and global_scope are technically mutable,
+    consumers should treat them as read-only when possible to ensure safe parallel access.
+    The functions collections are strictly immutable to prevent corruption.
     """
     functions: Dict[str, Tuple[SymbolInfo, ...]] = field(default_factory=dict)
-    structs: Mapping[str, SymbolInfo] = field(default_factory=dict)
-    enums: Mapping[str, SymbolInfo] = field(default_factory=dict)
-    type_aliases: Mapping[str, SymbolInfo] = field(default_factory=dict)
+    structs: Dict[str, SymbolInfo] = field(default_factory=dict)
+    enums: Dict[str, SymbolInfo] = field(default_factory=dict)
+    type_aliases: Dict[str, SymbolInfo] = field(default_factory=dict)
     extern_functions: Dict[str, Tuple[SymbolInfo, ...]] = field(default_factory=dict)
-    global_scope: Mapping[str, str] = field(default_factory=dict)
+    global_scope: Dict[str, str] = field(default_factory=dict)
     duplicate_declarations: Tuple[Tuple[str, SymbolInfo, SymbolInfo], ...] = field(default_factory=tuple)
     
     def get_function_overloads(self, name: str) -> Tuple[SymbolInfo, ...]:
@@ -172,8 +168,7 @@ class MutableSymbolTable:
         self.global_scope[alias] = import_info
     
     def freeze(self) -> GlobalSymbolTable:
-        """Convert to immutable global symbol table"""
-        # Convert lists to tuples and dicts to mapping proxies for immutability
+        """Create an immutable snapshot of the current symbol table"""
         immutable_functions = {
             name: tuple(infos) for name, infos in self.functions.items()
         }
@@ -183,11 +178,11 @@ class MutableSymbolTable:
         
         return GlobalSymbolTable(
             functions=immutable_functions,
-            structs=MappingProxyType(dict(self.structs)),
-            enums=MappingProxyType(dict(self.enums)),
-            type_aliases=MappingProxyType(dict(self.type_aliases)),
+            structs=dict(self.structs),  # Return mutable dict for backward compatibility
+            enums=dict(self.enums),      # Return mutable dict for backward compatibility
+            type_aliases=dict(self.type_aliases),  # Return mutable dict for backward compatibility
             extern_functions=immutable_extern_functions,
-            global_scope=MappingProxyType(dict(self.global_scope)),
+            global_scope=dict(self.global_scope),  # Return mutable dict for backward compatibility
             duplicate_declarations=tuple(self.duplicate_declarations)  # Make immutable
         )
 

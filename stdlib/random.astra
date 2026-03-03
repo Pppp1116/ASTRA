@@ -3,6 +3,8 @@
 /// Provides pseudo-random number generation utilities.
 /// This module is hosted-only as it requires OS entropy source.
 
+#if !__FREESTANDING__
+
 use core;
 
 /// Random number generator state
@@ -118,3 +120,5 @@ fn rng_next(rng: Rng) -> Int {
     rng.state = rng.state ^ (rng.state << 5);
     return rng.state;
 }
+
+#endif // !__FREESTANDING__

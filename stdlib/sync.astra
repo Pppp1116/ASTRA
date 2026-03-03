@@ -3,6 +3,8 @@
 /// Provides mutex, atomic operations, and other concurrency utilities.
 /// This module is hosted-only as it requires OS threading support.
 
+#if !__FREESTANDING__
+
 use std.time;
 
 /// Simple mutex for mutual exclusion
@@ -89,3 +91,5 @@ pub fn condvar_signal(cv: CondVar) -> Void {
 pub fn condvar_broadcast(cv: CondVar) -> Void {
     __condvar_broadcast(cv);
 }
+
+#endif // !__FREESTANDING__

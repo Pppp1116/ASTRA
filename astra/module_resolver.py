@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Dict, Any, Set
+from typing import Dict, Any, Set, Optional
 from dataclasses import dataclass
 
 from astra.ast import ImportDecl, Program, FnDecl, ExternFnDecl, StructDecl, EnumDecl, TypeAliasDecl
@@ -19,6 +19,11 @@ class ModuleResolutionError(ValueError):
     pass
 
 
+@dataclass(frozen=True)
+class CachedModuleSymbols:
+    """Cached module symbols with modification time"""
+    symbols: ModuleSymbols
+    mtime: float  # File modification time when cached
 @dataclass(frozen=True)
 class ModuleSymbols:
     """Symbols exported by a module"""
@@ -53,7 +58,7 @@ class ModuleSymbols:
 
 
 # Cache for loaded module symbols to avoid re-parsing
-_module_symbol_cache: Dict[Path, ModuleSymbols] = {}
+_module_symbol_cache: Dict[Path, CachedModuleSymbols] = {}
 
 
 def import_label(decl: ImportDecl) -> str:
@@ -145,9 +150,15 @@ def _resolve_module_import(path: list[str], from_filename: str, label: str) -> P
 
 def load_module_symbols(module_path: Path) -> ModuleSymbols:
     """Load and extract symbols from a module file"""
-    # Check cache first
+    # Check cache first with modification time validation
+    current_mtime = module_path.stat().st_mtime if module_path.exists() else 0
+    
     if module_path in _module_symbol_cache:
-        return _module_symbol_cache[module_path]
+        cached = _module_symbol_cache[module_path]
+        if cached.mtime == current_mtime:
+            return cached.symbols
+        # File has been modified, remove stale cache entry
+        del _module_symbol_cache[module_path]
     
     if not module_path.exists():
         raise ModuleResolutionError(f"Module file not found: {module_path}")
@@ -190,8 +201,11 @@ def load_module_symbols(module_path: Path) -> ModuleSymbols:
             pub_symbols=frozenset(pub_symbols)
         )
         
-        # Cache the results
-        _module_symbol_cache[module_path] = symbols
+        # Cache the results with modification time
+        _module_symbol_cache[module_path] = CachedModuleSymbols(
+            symbols=symbols,
+            mtime=current_mtime
+        )
         return symbols
         
     except Exception as e:

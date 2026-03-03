@@ -499,7 +499,7 @@ class _MoveState:
 
 def _assign_base_name(target: Any) -> str | None:
     cur = target
-    while isinstance(cur, (FieldExpr, IndexExpr)):
+    while isinstance(cur, (FieldExpr, ModuleAccessExpr, IndexExpr)):
         cur = cur.obj
     if isinstance(cur, Name):
         return cur.value
@@ -1034,8 +1034,16 @@ def analyze(
                     
                     if item.alias:
                         # Import with alias: add all symbols under the alias namespace
+                        # Check for collision with existing symbols
+                        if item.alias in global_scope:
+                            raise SemanticError(_diag(filename, item.line, item.col, f"import alias '{item.alias}' collides with existing symbol"))
+                        
                         for symbol_name, symbol_decl in imported_symbols.items():
                             qualified_name = f"{item.alias}::{symbol_name}"
+                            # Check for collision with existing symbols
+                            if qualified_name in global_scope:
+                                raise SemanticError(_diag(filename, item.line, item.col, f"imported symbol '{qualified_name}' collides with existing symbol"))
+                            
                             # Store the actual type information
                             if isinstance(symbol_decl, (FnDecl, ExternFnDecl)):
                                 global_scope[qualified_name] = f"fn({', '.join(t for _, t in symbol_decl.params)}) -> {symbol_decl.ret}"
@@ -1051,7 +1059,16 @@ def analyze(
                         global_scope[item.alias] = f"module:{resolved_path}"
                     else:
                         # Import without alias: add symbols directly to global scope
+                        # Check for collision with existing symbols
+                        module_name = item.path[-1] if item.path else Path(item.source).stem
+                        if module_name in global_scope:
+                            raise SemanticError(_diag(filename, item.line, item.col, f"import module '{module_name}' collides with existing symbol"))
+                        
                         for symbol_name, symbol_decl in imported_symbols.items():
+                            # Check for collision with existing symbols
+                            if symbol_name in global_scope:
+                                raise SemanticError(_diag(filename, item.line, item.col, f"imported symbol '{symbol_name}' collides with existing symbol"))
+                            
                             # Store the actual type information
                             if isinstance(symbol_decl, (FnDecl, ExternFnDecl)):
                                 global_scope[symbol_name] = f"fn({', '.join(t for _, t in symbol_decl.params)}) -> {symbol_decl.ret}"
@@ -1064,7 +1081,6 @@ def analyze(
                             elif isinstance(symbol_decl, TypeAliasDecl):
                                 global_scope[symbol_name] = symbol_decl.target
                         # Add the last path component as module name for qualified access
-                        module_name = item.path[-1] if item.path else Path(item.source).stem
                         global_scope[module_name] = f"module:{resolved_path}"
                     continue
                 if isinstance(item, StructDecl):
@@ -1842,37 +1858,47 @@ def _infer(
     if isinstance(e, FieldExpr):
         obj_ty = _infer(e.obj, scopes, fixed_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok)
         
+        # Handle struct field access
+        if obj_ty.startswith("struct:"):
+            struct_name = obj_ty[7:]  # Remove "struct:" prefix
+            if struct_name not in structs:
+                raise SemanticError(_diag(filename, e.line, e.col, f"unknown struct {struct_name}"))
+            struct_decl = structs[struct_name]
+            field_ty = None
+            for fname, fty in struct_decl.fields:
+                if fname == e.field:
+                    field_ty = fty
+                    break
+            if field_ty is None:
+                raise SemanticError(_diag(filename, e.line, e.col, f"struct {struct_name} has no field {e.field}"))
+            return _typed(e, field_ty)
+        else:
+            # Check if it's an imported struct - look for qualified names
+            for struct_name, struct_decl in structs.items():
+                if "::" in struct_name and struct_name.endswith(f"::{obj_ty}"):
+                    struct_to_check = struct_decl
+                    break
+            if struct_to_check is not None:
+                for fname, fty in struct_to_check.fields:
+                    if fname == e.field:
+                        return _typed(e, fty)
+        return _typed(e, "Any")
+    if isinstance(e, ModuleAccessExpr):
+        obj_ty = _infer(e.obj, scopes, fixed_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok)
+        
         # Handle qualified access to imported symbols (module::symbol)
         if isinstance(e.obj, Name):
             obj_type = _lookup(e.obj.value, scopes)
             if obj_type is not None and obj_type.startswith("module:"):
                 # This is a qualified access to an imported module symbol
-                qualified_name = f"{e.obj.value}::{e.field}"
+                qualified_name = f"{e.obj.value}::{e.module}"
                 symbol_type = _lookup(qualified_name, scopes)
                 if symbol_type is not None:
                     return _typed(e, symbol_type)
                 else:
-                    raise SemanticError(_diag(filename, e.line, e.col, f"module {e.obj.value} has no symbol {e.field}"))
+                    raise SemanticError(_diag(filename, e.line, e.col, f"module {e.obj.value} has no symbol {e.module}"))
         
-        # Handle regular struct field access
-        # Strip reference types to get the underlying struct type
-        base_ty = _strip_ref(obj_ty)
-        
-        # Check for both direct and qualified struct names
-        struct_to_check = None
-        if base_ty in structs:
-            struct_to_check = structs[base_ty]
-        else:
-            # Check if it's an imported struct - look for qualified names
-            for struct_name, struct_decl in structs.items():
-                if "::" in struct_name and struct_name.endswith(f"::{base_ty}"):
-                    struct_to_check = struct_decl
-                    break
-        
-        if struct_to_check is not None:
-            for fname, fty in struct_to_check.fields:
-                if fname == e.field:
-                    return _typed(e, fty)
+        raise SemanticError(_diag(filename, e.line, e.col, f"invalid module access {e.obj.value}::{e.module}"))
         return _typed(e, "Any")
     if isinstance(e, ArrayLit):
         if not e.elements:
@@ -2124,58 +2150,66 @@ def _infer_call(
     if isinstance(e.fn, FieldExpr):
         obj_ty = _infer(e.fn.obj, scopes, fixed_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok)
         
+        # Handle struct field access
+        if obj_ty.startswith("struct:"):
+            struct_name = obj_ty[7:]  # Remove "struct:" prefix
+            if struct_name not in structs:
+                raise SemanticError(_diag(filename, e.line, e.col, f"unknown struct {struct_name}"))
+            struct_decl = structs[struct_name]
+            field_ty = None
+            for fname, fty in struct_decl.fields:
+                if fname == e.fn.field:
+                    field_ty = fty
+                    break
+            if field_ty is None:
+                raise SemanticError(_diag(filename, e.line, e.col, f"struct {struct_name} has no field {e.fn.field}"))
+            if not field_ty.startswith("fn("):
+                raise SemanticError(_diag(filename, e.line, e.col, f"field {e.fn.field} is not callable"))
+            parsed = _parse_fn_type(field_ty)
+            param_tys, ret_ty, callee_unsafe = parsed
+            if callee_unsafe:
+                _require_unsafe_context(f"{struct_name}.{e.fn.field}", e.line, e.col)
+            if len(param_tys) != len(e.args):
+                raise SemanticError(_diag(filename, e.line, e.col, f"{struct_name}.{e.fn.field} expects {len(param_tys)} args, got {len(e.args)}"))
+            for i, (expected, arg) in enumerate(zip(param_tys, e.args)):
+                aty = arg_types[i]
+                _require_type(filename, arg.line, arg.col, expected, aty, f"arg {i} for {struct_name}.{e.fn.field}")
+                if not _is_ref_type(expected) and expected != "Any":
+                    _consume_if_move_name(arg, aty, move, filename, arg.line, arg.col)
+            return ret_ty
+        
+        return _typed(e, "Any")
+    if isinstance(e.fn, ModuleAccessExpr):
+        obj_ty = _infer(e.fn.obj, scopes, fixed_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok)
+        
         # Handle qualified access to imported symbols (module::symbol)
         if isinstance(e.fn.obj, Name):
             obj_type = _lookup(e.fn.obj.value, scopes)
             if obj_type is not None and obj_type.startswith("module:"):
                 # This is a qualified access to an imported module symbol
-                qualified_name = f"{e.fn.obj.value}::{e.fn.field}"
+                qualified_name = f"{e.fn.obj.value}::{e.fn.module}"
                 symbol_type = _lookup(qualified_name, scopes)
                 if symbol_type is not None:
                     # Check if it's a function
-                    parsed = _parse_fn_type(symbol_type)
-                    if parsed is not None:
-                        # It's a function - handle function call
+                    if symbol_type.startswith("fn("):
+                        parsed = _parse_fn_type(symbol_type)
                         param_tys, ret_ty, callee_unsafe = parsed
                         if callee_unsafe:
-                            _require_unsafe_context(f"{e.fn.obj.value}::{e.fn.field}", e.line, e.col)
+                            _require_unsafe_context(f"{e.fn.obj.value}::{e.fn.module}", e.line, e.col)
                         if len(param_tys) != len(e.args):
-                            raise SemanticError(_diag(filename, e.line, e.col, f"{e.fn.obj.value}::{e.fn.field} expects {len(param_tys)} args, got {len(e.args)}"))
+                            raise SemanticError(_diag(filename, e.line, e.col, f"{e.fn.obj.value}::{e.fn.module} expects {len(param_tys)} args, got {len(e.args)}"))
                         for i, (expected, arg) in enumerate(zip(param_tys, e.args)):
                             aty = arg_types[i]
-                            _require_type(filename, arg.line, arg.col, expected, aty, f"arg {i} for {e.fn.obj.value}::{e.fn.field}")
+                            _require_type(filename, arg.line, arg.col, expected, aty, f"arg {i} for {e.fn.obj.value}::{e.fn.module}")
                             if not _is_ref_type(expected) and expected != "Any":
                                 _consume_if_move_name(arg, aty, move, filename, arg.line, arg.col)
                         return ret_ty
                     else:
-                        # It's not a function - check if it's a struct
-                        if qualified_name in structs:
-                            # It's a struct constructor
-                            struct_decl = structs[qualified_name]
-                            if len(e.args) != len(struct_decl.fields):
-                                raise SemanticError(_diag(filename, e.line, e.col, f"struct {symbol_type} expects {len(struct_decl.fields)} fields, got {len(e.args)}"))
-                            for i, ((field_name, field_type), arg) in enumerate(zip(struct_decl.fields, e.args)):
-                                aty = arg_types[i]
-                                _require_type(filename, arg.line, arg.col, field_type, aty, f"struct field {field_name} for {symbol_type}")
-                                if not _is_ref_type(field_type) and field_type != "Any":
-                                    _consume_if_move_name(arg, aty, move, filename, arg.line, arg.col)
-                            return symbol_type
-                        else:
-                            # Not a function or struct - can't call it
-                            raise SemanticError(_diag(filename, e.line, e.col, f"cannot call non-function value {e.fn.field} of type {symbol_type}"))
+                        raise SemanticError(_diag(filename, e.line, e.col, f"{e.fn.obj.value}::{e.fn.module} is not callable"))
                 else:
-                    raise SemanticError(_diag(filename, e.line, e.col, f"module {e.fn.obj.value} has no symbol {e.fn.field}"))
+                    raise SemanticError(_diag(filename, e.line, e.col, f"module {e.fn.obj.value} has no symbol {e.fn.module}"))
         
-        # Handle built-in .get method for containers
-        if e.fn.field == "get":
-            if len(e.args) != 1:
-                raise SemanticError(_diag(filename, e.line, e.col, "get expects 1 arg"))
-            _require_type(filename, e.args[0].line, e.args[0].col, "Int", arg_types[0], "arg 0 for get")
-            base_ty = _strip_ref(_canonical_type(obj_ty))
-            if _is_slice_type(base_ty):
-                return f"Option<{_slice_inner(base_ty)}>"
-            if _is_vec_type(base_ty):
-                return f"Option<{_vec_inner(base_ty)}>"
+        raise SemanticError(_diag(filename, e.line, e.col, f"invalid module access {e.fn.obj.value}::{e.fn.module}"))
         return "Any"
     callee_ty = _infer(e.fn, scopes, fixed_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok)
     setattr(e.fn, "inferred_type", callee_ty)

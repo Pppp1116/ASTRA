@@ -4,6 +4,8 @@
 /// process information, and system operations.
 /// This module is hosted-only as it requires OS access.
 
+#if !__FREESTANDING__
+
 use std.io;
 use std.str;
 
@@ -101,3 +103,5 @@ pub fn command_output(command: String, args: Vec<String>) -> Result<String, Int>
         return Err(result.exit_code);
     }
 }
+
+#endif // !__FREESTANDING__

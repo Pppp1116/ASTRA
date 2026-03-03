@@ -1,7 +1,9 @@
-/// std.regex – regular expression utilities (freestanding-safe).
+/// std.regex – regular expression utilities (hosted only).
 ///
 /// Provides basic regular expression matching and compilation.
-/// These utilities are pure and valid in both hosted and freestanding modes.
+/// This module requires runtime regex engine support.
+
+#if !__FREESTANDING__
 
 use core;
 
@@ -79,3 +81,5 @@ pub fn escape(text: String) -> String {
     }
     return result;
 }
+
+#endif // !__FREESTANDING__

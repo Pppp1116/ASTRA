@@ -20,15 +20,16 @@ def cmd_build(a):
         emit_ir=a.emit_ir,
         strict=a.strict,
         freestanding=a.freestanding,
-        profile=a.profile or "release",
+        profile=a.profile,
         overflow=a.overflow,
         triple=a.triple,
         profile_compile=a.profile_compile,
         threads=a.threads,
     )
     
-    # Always print state for tool compatibility
-    print(state)
+    # Print state for tool compatibility (only when explicitly requested)
+    if a.verbose:
+        print(state)
     
     # Print profiling output separately to stderr to avoid breaking tools
     if a.profile_compile and a.profile_json:
@@ -219,6 +220,7 @@ def main(argv=None):
     b.add_argument("--profile", choices=["debug", "release"], default="debug")
     b.add_argument("--overflow", choices=["trap", "wrap", "debug"], default="debug")
     b.add_argument("--triple")
+    b.add_argument("--verbose", action="store_true", help="Print build state information")
     _add_global_flags(b)
     b.set_defaults(func=cmd_build)
 

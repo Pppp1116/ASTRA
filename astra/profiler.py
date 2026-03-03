@@ -60,10 +60,14 @@ class Profiler:
             self._records.clear()
             self._phase_stats.clear()
             # Reset thread-local accumulators safely
+            # Create a snapshot of thread locals to avoid race conditions
+            thread_locals_snapshot = list(self._thread_locals.values())
             # Clear existing thread-local stacks before clearing the dict
-            for thread_profiler in self._thread_locals.values():
-                thread_profiler._stack.clear()
-                thread_profiler._records.clear()
+            for thread_profiler in thread_locals_snapshot:
+                # Double-check the profiler is still in the dict to avoid race
+                if thread_profiler in self._thread_locals.values():
+                    thread_profiler._stack.clear()
+                    thread_profiler._records.clear()
             self._thread_locals.clear()
 
     def disable(self) -> None:
