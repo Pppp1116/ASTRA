@@ -1927,6 +1927,8 @@ def _compile_expr(ctx: _ModuleCtx, state: _FnState, e: Any, overflow_mode: str =
     b = state.builder
     if isinstance(e, WildcardPattern):
         raise CodegenError(_diag(e, "wildcard pattern `_` is only valid in match arms"))
+    if isinstance(e, (BindPattern, VariantPattern, GuardPattern)):
+        raise CodegenError(_diag(e, "pattern is only valid in match arms"))
     if isinstance(e, BoolLit):
         return _Value(ir.Constant(ir.IntType(1), 1 if e.value else 0), "Bool")
     if isinstance(e, NilLit):
@@ -2758,16 +2760,30 @@ def _compile_stmt(ctx: _ModuleCtx, state: _FnState, st: Any, overflow_mode: str)
         for i, (pat, body) in enumerate(st.arms):
             state.builder.position_at_end(cur_check)
             arm_block = fn.append_basic_block(f"match_arm_{i}")
-            if isinstance(pat, WildcardPattern):
-                state.builder.branch(arm_block)
+            raw_pat = pat.pattern if isinstance(pat, GuardPattern) else pat
+            guard = pat.cond if isinstance(pat, GuardPattern) else None
+            if isinstance(raw_pat, VariantPattern):
+                raise CodegenError(_diag(raw_pat, "enum variant match patterns are currently only supported on Python backend"))
+            if isinstance(raw_pat, (WildcardPattern, BindPattern)):
+                if guard is None:
+                    state.builder.branch(arm_block)
+                else:
+                    next_block = fn.append_basic_block(f"match_next_{i}")
+                    gv = _compile_expr(ctx, state, guard, overflow_mode=overflow_mode)
+                    gb = _coerce_value(ctx, state, gv.value, gv.ty, "Bool", guard)
+                    state.builder.cbranch(gb, arm_block, next_block)
             else:
                 next_block = fn.append_basic_block(f"match_next_{i}")
-                pv = _compile_expr(ctx, state, pat, overflow_mode=overflow_mode)
-                pvv = _coerce_value(ctx, state, pv.value, pv.ty, subj.ty, pat)
+                pv = _compile_expr(ctx, state, raw_pat, overflow_mode=overflow_mode)
+                pvv = _coerce_value(ctx, state, pv.value, pv.ty, subj.ty, raw_pat)
                 if isinstance(subj.value.type, (ir.FloatType, ir.DoubleType)):
                     cmpv = state.builder.fcmp_ordered("==", subj.value, pvv)
                 else:
                     cmpv = state.builder.icmp_unsigned("==", subj.value, pvv)
+                if guard is not None:
+                    gv = _compile_expr(ctx, state, guard, overflow_mode=overflow_mode)
+                    gb = _coerce_value(ctx, state, gv.value, gv.ty, "Bool", guard)
+                    cmpv = state.builder.and_(cmpv, gb)
                 state.builder.cbranch(cmpv, arm_block, next_block)
 
             state.builder.position_at_end(arm_block)
@@ -2777,7 +2793,7 @@ def _compile_stmt(ctx: _ModuleCtx, state: _FnState, st: Any, overflow_mode: str)
                     break
             if not _is_terminated(state):
                 state.builder.branch(end_block)
-            if isinstance(pat, WildcardPattern):
+            if isinstance(raw_pat, (WildcardPattern, BindPattern)):
                 cur_check = None
                 break
             cur_check = next_block

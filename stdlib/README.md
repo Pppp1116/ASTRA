@@ -17,6 +17,7 @@ Each module is either **freestanding-safe** (can be analyzed/used with
 | `collections.astra` | Hosted list/map helpers built on the runtime list/map API. | ❌ |
 | `io.astra`       | Hosted file I/O (`read`, `write`, `read_or`, etc.) and printing helpers (`print_int`, `print_bool`, `print_float`, `print_str`, `print_any`). | ❌ |
 | `str.astra`      | Hosted string utilities (`length`, `is_empty`, `to_string_*`, `parse_int`). | ❌ |
+| `bytes.astra`    | Borrowed `&[u8]`/`&str` view helpers and hosted UTF-8 validate/encode/decode utilities. | ❌ |
 | `net.astra`      | Hosted TCP helpers (`tcp_connect`, `tcp_send`, `tcp_send_line`, `tcp_recv`, `tcp_close`). | ❌ |
 | `process.astra`  | Hosted process/environment helpers (`exit`, `env_or`, `cwd`, `run_ok`, `eprintln`). | ❌ |
 | `crypto.astra`   | Hosted cryptographic helpers (`sha256`, `hmac_sha256`, `digest_pair`). | ❌ |

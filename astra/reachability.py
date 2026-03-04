@@ -10,6 +10,9 @@ from astra.ast import (
     AssignStmt,
     AwaitExpr,
     Binary,
+    BindPattern,
+    VariantPattern,
+    GuardPattern,
     BreakStmt,
     Call,
     CastExpr,
@@ -41,6 +44,7 @@ from astra.ast import (
     Unary,
     UnsafeStmt,
     WhileStmt,
+    WildcardPattern,
     BitSizeOfTypeExpr,
     SizeOfValueExpr,
     AlignOfValueExpr,
@@ -91,6 +95,9 @@ def prune_unreachable_items(prog: Program, *, entry: str = "main") -> Program:
     roots = set(fn_name_to_keys.get(entry, set()))
     if entry != "_start":
         roots |= fn_name_to_keys.get("_start", set())
+    for item in fn_items:
+        if isinstance(item, FnDecl) and item.pub:
+            roots.add(_fn_key(item))
 
     reachable_fns: set[str] = set()
     reachable_types: set[str] = set()
@@ -288,7 +295,7 @@ def _scan_stmt(st: Any, fn_name_to_keys: dict[str, set[str]], enum_map: dict[str
     if isinstance(st, MatchStmt):
         c, t, d = _scan_expr(st.expr, fn_name_to_keys, enum_map, known_types)
         for pat, body in st.arms:
-            bc, bt, bd = _scan_expr(pat, fn_name_to_keys, enum_map, known_types)
+            bc, bt, bd = _scan_pattern(pat, fn_name_to_keys, enum_map, known_types)
             c |= bc
             t |= bt
             d = d or bd
@@ -398,3 +405,23 @@ def _scan_expr(e: Any, fn_name_to_keys: dict[str, set[str]], enum_map: dict[str,
     if isinstance(e, (SizeOfValueExpr, AlignOfValueExpr)):
         return _scan_expr(e.expr, fn_name_to_keys, enum_map, known_types)
     return called, used_types, dynamic
+
+
+def _scan_pattern(pat: Any, fn_name_to_keys: dict[str, set[str]], enum_map: dict[str, EnumDecl], known_types: set[str]) -> tuple[set[str], set[str], bool]:
+    if isinstance(pat, GuardPattern):
+        c1, t1, d1 = _scan_pattern(pat.pattern, fn_name_to_keys, enum_map, known_types)
+        c2, t2, d2 = _scan_expr(pat.cond, fn_name_to_keys, enum_map, known_types)
+        return c1 | c2, t1 | t2, d1 or d2
+    if isinstance(pat, VariantPattern):
+        c: set[str] = set()
+        t: set[str] = set()
+        d = False
+        for sub in pat.args:
+            sc, st, sd = _scan_pattern(sub, fn_name_to_keys, enum_map, known_types)
+            c |= sc
+            t |= st
+            d = d or sd
+        return c, t, d
+    if isinstance(pat, (WildcardPattern, BindPattern)):
+        return set(), set(), False
+    return _scan_expr(pat, fn_name_to_keys, enum_map, known_types)
