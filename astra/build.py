@@ -53,6 +53,9 @@ from astra.ast import (
     UnsafeStmt,
     WhileStmt,
     WildcardPattern,
+    BindPattern,
+    VariantPattern,
+    GuardPattern,
 )
 from astra.comptime import run_comptime
 from astra.codegen import to_python
@@ -300,6 +303,21 @@ def _strict_walk_expr(e: object, errs: list[str]) -> None:
         return
 
 
+
+
+def _strict_walk_pattern(pat: object, errs: list[str]) -> None:
+    if isinstance(pat, GuardPattern):
+        _strict_walk_pattern(pat.pattern, errs)
+        _strict_walk_expr(pat.cond, errs)
+        return
+    if isinstance(pat, VariantPattern):
+        for sub in pat.args:
+            _strict_walk_pattern(sub, errs)
+        return
+    if isinstance(pat, (WildcardPattern, BindPattern)):
+        return
+    _strict_walk_expr(pat, errs)
+
 def _strict_walk_stmt(st: object, errs: list[str]) -> None:
     if type(st) not in _STRICT_STMTS:
         errs.append(f"unsupported statement node {type(st).__name__}")
@@ -397,7 +415,14 @@ def _build_native_llvm(ir_text: str, out_path: str, src_file: Path, *, profile: 
     with tempfile.TemporaryDirectory(prefix="astra-native-") as td:
         ll_path = Path(td) / "module.ll"
         ll_path.write_text(ir_text)
-        
+        opt = shutil.which("opt")
+        if opt is not None and profile == "release" and opt_size:
+            opt_out = Path(td) / "module.opt.ll"
+            opt_cmd = [opt, "-S", "-passes=globaldce,adce", str(ll_path), "-o", str(opt_out)]
+            opt_cp = subprocess.run(opt_cmd, capture_output=True, text=True)
+            if opt_cp.returncode == 0:
+                ll_path = opt_out
+
         if freestanding:
             print("Building freestanding executable...")
             cmd = [

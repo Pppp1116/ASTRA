@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import argparse
+import cProfile
 import json
 import os
+import pstats
+import runpy
 import threading
 import time
 from contextlib import contextmanager
@@ -204,3 +208,18 @@ class Profiler:
 
 # Module-level singleton profiler
 profiler = Profiler()
+
+
+def main(argv=None):
+    p = argparse.ArgumentParser()
+    p.add_argument("script")
+    ns = p.parse_args(argv)
+    pr = cProfile.Profile()
+    pr.enable()
+    runpy.run_path(ns.script, run_name="__main__")
+    pr.disable()
+    pstats.Stats(pr).sort_stats("cumulative").print_stats(20)
+
+
+if __name__ == "__main__":
+    main()

@@ -458,6 +458,8 @@ def _expr(e: Any) -> str:
         return e.value
     if isinstance(e, WildcardPattern):
         raise CodegenError(_diag(e, "wildcard pattern `_` is only valid in match arms"))
+    if isinstance(e, (BindPattern, VariantPattern, GuardPattern)):
+        raise CodegenError(_diag(e, "pattern is only valid in match arms"))
     if isinstance(e, AwaitExpr):
         return f"await_result({_expr(e.expr)})"
     if isinstance(e, CastExpr):
@@ -467,6 +469,9 @@ def _expr(e: Any) -> str:
     if isinstance(e, Unary):
         if e.op == "!":
             return f"(not {_expr(e.expr)})"
+        if e.op in {"&", "&mut", "*"}:
+            # Python backend has no explicit borrow/deref operators; treat as view aliases.
+            return _expr(e.expr)
         return f"({e.op}{_expr(e.expr)})"
     if isinstance(e, Binary):
         if e.op == "??":
@@ -536,6 +541,34 @@ def _target_expr(t: Any) -> str:
     return _expr(t)
 
 
+def _pattern_cond_py(pat: Any, val: str) -> str:
+    if isinstance(pat, WildcardPattern):
+        return "True"
+    if isinstance(pat, BindPattern):
+        return "True"
+    if isinstance(pat, VariantPattern):
+        checks = [f"isinstance({val}, dict)", f"{val}.get('__enum__') == {pat.enum_name!r}", f"{val}.get('tag') == {pat.variant!r}"]
+        if pat.args:
+            checks.append(f"len({val}.get('values', [])) == {len(pat.args)}")
+            for i, sub in enumerate(pat.args):
+                checks.append(_pattern_cond_py(sub, f"{val}.get('values', [])[{i}]"))
+        return " and ".join(f"({c})" for c in checks)
+    return f"{val} == {_expr(pat)}"
+
+
+def _pattern_bind_py(pat: Any, val: str) -> list[str]:
+    if isinstance(pat, BindPattern):
+        return [f"{pat.name} = {val}"]
+    if isinstance(pat, GuardPattern):
+        return _pattern_bind_py(pat.pattern, val)
+    if isinstance(pat, VariantPattern):
+        out: list[str] = []
+        for i, sub in enumerate(pat.args):
+            out.extend(_pattern_bind_py(sub, f"{val}.get('values', [])[{i}]"))
+        return out
+    return []
+
+
 def _stmt_py(st: Any, ind: int) -> list[str]:
     p = "    " * ind
     if isinstance(st, LetStmt):
@@ -579,7 +612,9 @@ def _stmt_py(st: Any, ind: int) -> list[str]:
         lines = [f"{p}__match_value_{ind} = {_expr(st.expr)}"]
         has_wildcard = False
         for idx, (pat, body) in enumerate(st.arms):
-            if isinstance(pat, WildcardPattern):
+            raw_pat = pat.pattern if isinstance(pat, GuardPattern) else pat
+            guard = pat.cond if isinstance(pat, GuardPattern) else None
+            if isinstance(raw_pat, WildcardPattern):
                 has_wildcard = True
                 head = "if" if idx == 0 else "else"
                 if head == "if":
@@ -588,7 +623,12 @@ def _stmt_py(st: Any, ind: int) -> list[str]:
                     lines.append(f"{p}else:")
             else:
                 head = "if" if idx == 0 else "elif"
-                lines.append(f"{p}{head} __match_value_{ind} == {_expr(pat)}:")
+                cond = _pattern_cond_py(raw_pat, f"__match_value_{ind}")
+                if guard is not None:
+                    cond = f"({cond}) and ({_expr(guard)})"
+                lines.append(f"{p}{head} {cond}:")
+            for ln in _pattern_bind_py(raw_pat, f"__match_value_{ind}"):
+                lines.append(f"{'    ' * (ind + 1)}{ln}")
             if body:
                 for s in body:
                     lines.extend(_stmt_py(s, ind + 1))

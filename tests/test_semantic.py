@@ -236,7 +236,41 @@ fn main() -> Int { return pick(1); }
         analyze(parse(src))
         assert False
     except SemanticError as e:
-        assert "ambiguous impl" in str(e)
+        assert "ambiguous impl" in str(e) or "overlapping impl specializations" in str(e)
+
+
+def test_specialization_respects_where_copy_constraint():
+    src = """
+impl fn dup<T>(x T) -> T where T: Copy { return x; }
+fn main() -> Int { return dup(3); }
+"""
+    analyze(parse(src))
+
+
+def test_specialization_rejects_where_copy_for_non_copy_type():
+    src = """
+struct Box { v Int }
+impl fn dup<T>(x T) -> T where T: Copy { return x; }
+fn main() -> Int { let b = Box(1); let _x = dup(b); return 0; }
+"""
+    try:
+        analyze(parse(src))
+        assert False
+    except SemanticError as e:
+        assert "no matching impl for dup(Box)" in str(e)
+
+
+def test_overlapping_impls_with_same_specificity_rejected_early():
+    src = """
+impl fn choose<T>(x T) -> T { return x; }
+impl fn choose<U>(y U) -> U { return y; }
+fn main() -> Int { return 0; }
+"""
+    try:
+        analyze(parse(src))
+        assert False
+    except SemanticError as e:
+        assert "overlapping impl specializations" in str(e)
 
 
 def test_function_references_infer_function_pointer_type():
@@ -786,3 +820,54 @@ def test_any_binding_named_like_type_does_not_infer_struct_fields():
     analyze(prog)
     expr = prog.items[1].body[1].expr
     assert getattr(expr, "inferred_type", None) == "Any"
+
+
+def test_enum_match_exhaustive_with_variant_patterns_and_bindings():
+    src = """
+enum Result { Ok(Int), Err(Int) }
+fn main() -> Int {
+  let v = Result.Ok(7);
+  match v {
+    Result.Ok(x) => { return x; },
+    Result.Err(_) => { return 0; }
+  }
+}
+"""
+    analyze(parse(src))
+
+
+def test_enum_match_reports_non_exhaustive_variants():
+    src = """
+enum Result { Ok(Int), Err(Int) }
+fn main() -> Int {
+  let v = Result.Ok(7);
+  match v {
+    Result.Ok(_) => { return 1; }
+  }
+  return 0;
+}
+"""
+    try:
+        analyze(parse(src))
+        assert False
+    except SemanticError as e:
+        assert "non-exhaustive match for Result" in str(e)
+
+
+def test_enum_match_duplicate_variant_arm_is_rejected():
+    src = """
+enum Result { Ok(Int), Err(Int) }
+fn main() -> Int {
+  let v = Result.Ok(7);
+  match v {
+    Result.Ok(_) => { return 1; },
+    Result.Ok(_) => { return 2; },
+    Result.Err(_) => { return 0; }
+  }
+}
+"""
+    try:
+        analyze(parse(src))
+        assert False
+    except SemanticError as e:
+        assert "unreachable duplicate enum match arm" in str(e)

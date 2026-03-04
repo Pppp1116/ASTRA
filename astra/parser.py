@@ -96,9 +96,13 @@ class Parser:
 
     def recover(self) -> None:
         sync = {";", "}", "fn", "impl", "struct", "enum", "type", "import", "extern", "pub", "async", "unsafe", "comptime", "EOF"}
+        start = self.i
         while self.cur().kind not in sync:
             self.i += 1
         if self.cur().kind in {";", "}"}:
+            self.i += 1
+        elif self.i == start and self.cur().kind != "EOF":
+            # Ensure forward progress at sync tokens that aren't directly consumed.
             self.i += 1
 
     def parse_program(self) -> Program:
@@ -287,6 +291,7 @@ class Parser:
         params = self._parse_params()
         self.eat("->")
         ret = self.parse_type()
+        where = self._parse_where_constraints()
         body = self.parse_block()
         return FnDecl(
             name,
@@ -294,6 +299,7 @@ class Parser:
             params,
             ret,
             body,
+            where=where,
             is_impl=is_impl,
             pub=is_pub,
             async_fn=is_async,
@@ -303,6 +309,21 @@ class Parser:
             line=fn_tok.line,
             col=fn_tok.col,
         )
+
+    def _parse_where_constraints(self) -> dict[str, list[str]]:
+        out: dict[str, list[str]] = {}
+        if not self.opt("where"):
+            return out
+        while True:
+            tvar = self.eat("IDENT")
+            self.eat(":")
+            traits = [self.eat("IDENT").text]
+            while self.opt("+"):
+                traits.append(self.eat("IDENT").text)
+            out[tvar.text] = traits
+            if not self.opt(","):
+                break
+        return out
 
     def parse_struct(self, is_pub: bool = False, doc: str = "", packed: bool = False) -> StructDecl:
         tok = self.eat("struct")
@@ -404,7 +425,10 @@ class Parser:
             try:
                 body.append(self.parse_stmt())
             except ParseError:
+                prev = self.i
                 self.recover()
+                if self.i == prev:
+                    raise
         self.eat("}")
         return body
 
@@ -590,17 +614,43 @@ class Parser:
         self.eat("{")
         arms: list[tuple[Any, list[Any]]] = []
         while self.cur().kind != "}":
-            if self.cur().kind == "IDENT" and self.cur().text == "_":
-                wtok = self.eat("IDENT")
-                pattern = WildcardPattern(wtok.pos, wtok.line, wtok.col)
-            else:
-                pattern = self.parse_expr()
+            pattern = self.parse_match_pattern()
+            if self.opt("if"):
+                iftok = self.toks[self.i - 1]
+                cond = self.parse_expr()
+                pattern = GuardPattern(pattern, cond, iftok.pos, iftok.line, iftok.col)
             self.eat("=>")
             body = self.parse_block()
             arms.append((pattern, body))
             self.opt(",")
         self.eat("}")
         return MatchStmt(expr, arms, tok.pos, tok.line, tok.col)
+
+    def parse_match_pattern(self):
+        tok = self.cur()
+        if tok.kind == "IDENT" and tok.text == "_":
+            wtok = self.eat("IDENT")
+            return WildcardPattern(wtok.pos, wtok.line, wtok.col)
+
+        if tok.kind == "IDENT" and self.peek().kind == "." and self.peek(2).kind == "IDENT":
+            enum_tok = self.eat("IDENT")
+            self.eat(".")
+            var_tok = self.eat("IDENT")
+            args: list[Any] = []
+            if self.opt("("):
+                if self.cur().kind != ")":
+                    while True:
+                        args.append(self.parse_match_pattern())
+                        if not self.opt(","):
+                            break
+                self.eat(")")
+            return VariantPattern(enum_tok.text, var_tok.text, args, enum_tok.pos, enum_tok.line, enum_tok.col)
+
+        if tok.kind == "IDENT":
+            btok = self.eat("IDENT")
+            return BindPattern(btok.text, btok.pos, btok.line, btok.col)
+
+        return self.parse_expr()
 
     def parse_expr(self, min_prec: int = 1):
         left = self.parse_cast()

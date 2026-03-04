@@ -49,6 +49,7 @@
 - expression statements may discard values of any type
 - typed params/fields accept `name Type` and `name: Type` (canonical style is `name: Type`)
 - specialization impls: `impl fn name(...) -> ... { ... }`
+- generic constraints on function impls: `where T: Copy + Send` (currently supported constraints: `Copy`, `Send`, `Sync`)
 - compile-time execution: `comptime { ... }` (pure/deterministic subset with control flow and function-typed call support)
 - text/buffer core types: `String`/`Vec<T>` (stdlib owned types), `str`/`[T]` (unsized DSTs behind references), `Bytes = Vec<u8>`
 - `[T]` is valid in practice as `&[T]` / `&mut [T]` (or other pointer-backed DST positions), not as a standalone sized value
@@ -69,6 +70,7 @@
 - `spawn` safety checks:
   - arguments must satisfy Send-like checks
   - shared references captured by `spawn` require Sync-like pointee types
+- `match` supports literal arms, wildcard `_`, bind patterns, enum variant patterns (`Enum.Variant`, `Enum.Variant(x, ...)`), and optional guards (`if cond`)
 - integer type syntax supports `iN`/`uN` where `N` is `1..128` (for example `u4`, `i127`)
 - integer literals support suffix typing like `15u4` and `3i7`
 - signed `i1` is rejected with a diagnostic hint (`did you mean u1?`)
