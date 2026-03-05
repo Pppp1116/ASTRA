@@ -75,16 +75,20 @@ from astra.parallel import parse_files_parallel, is_parallel_enabled
 from astra.symbols import build_global_symbol_table, validate_symbol_consistency
 from astra.parallel_semantic import analyze_program_parallel
 from astra.parallel_ir import optimize_program_parallel
+from astra.layout_optimizer import load_profile, optimize_llvm_layout, write_profile_template
+from astra.value_profile import apply_value_specialization, load_value_profile, write_value_profile_template
 
 CACHE = Path('.astra-cache.json')
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _TOOLCHAIN_STAMP: str | None = None
 
 def _hash(content: str) -> str:
+    """Return a deterministic SHA-256 hex digest for text content."""
     return hashlib.sha256(content.encode()).hexdigest()
 
 
 def _sha256_file(path: Path) -> str:
+    """Return the SHA-256 hex digest for a file on disk."""
     h = hashlib.sha256()
     with path.open("rb") as fh:
         while True:
@@ -96,6 +100,7 @@ def _sha256_file(path: Path) -> str:
 
 
 def _iter_tree_files(root: Path, suffixes: set[str] | None = None) -> list[Path]:
+    """Collect files under a directory, optionally filtered by suffix."""
     if not root.exists():
         return []
     out: list[Path] = []
@@ -109,6 +114,7 @@ def _iter_tree_files(root: Path, suffixes: set[str] | None = None) -> list[Path]
 
 
 def _toolchain_stamp() -> str:
+    """Compute and memoize a hash representing compiler/runtime inputs."""
     global _TOOLCHAIN_STAMP
     if _TOOLCHAIN_STAMP is not None:
         return _TOOLCHAIN_STAMP
@@ -129,7 +135,7 @@ def _toolchain_stamp() -> str:
 
 
 def _collect_input_files(src_file: Path) -> list[Path]:
-    """Collect all input files (sequential for now)"""
+    """Discover transitive source inputs used to build the root file."""
     visited: set[Path] = set()
     stack: list[Path] = [src_file.resolve()]
     while stack:
@@ -168,11 +174,20 @@ def _build_fingerprint(
     overflow_mode: str,
     triple: str | None,
     opt_size: bool,
+    profile_layout: bool,
+    opt_layout: bool,
+    profile_values: bool,
+    opt_value_profile: bool,
+    cpu_dispatch: bool,
+    cpu_target: str,
 ) -> str:
+    """Build a deterministic fingerprint payload hash for build caching."""
     inputs = [
         {"path": p.as_posix(), "sha256": _sha256_file(p)}
         for p in _collect_input_files(src_file)
     ]
+    profile_file = Path(".build") / "astra-profile.json"
+    profile_sha = _sha256_file(profile_file) if profile_file.exists() else ""
     payload = {
         "src": src_file.resolve().as_posix(),
         "target": target,
@@ -183,13 +198,22 @@ def _build_fingerprint(
         "overflow_mode": overflow_mode,
         "triple": triple or "",
         "opt_size": bool(opt_size),
+        "profile_layout": bool(profile_layout),
+        "opt_layout": bool(opt_layout),
+        "profile_values": bool(profile_values),
+        "opt_value_profile": bool(opt_value_profile),
+        "cpu_dispatch": bool(cpu_dispatch),
+        "cpu_target": cpu_target,
         "inputs": inputs,
         "toolchain": _toolchain_stamp(),
+        "layout_profile_sha": profile_sha if opt_layout else "",
+        "value_profile_sha": _sha256_file(Path(".build") / "value_profile.json") if opt_value_profile and (Path(".build") / "value_profile.json").exists() else "",
     }
     return _hash(json.dumps(payload, sort_keys=True, separators=(",", ":")))
 
 
 def _resolve_overflow_mode(profile: str, overflow: str, *, check: bool = False) -> str:
+    """Resolve effective overflow behavior for the selected profile and mode."""
     if overflow not in {"trap", "wrap", "debug"}:
         raise RuntimeError(f"BUILD <input>:1:1: unsupported overflow mode {overflow}")
     if overflow == "trap":
@@ -390,6 +414,7 @@ def _strict_walk_stmt(st: object, errs: list[str]) -> None:
 
 
 def _strict_validate_program(prog: Program, src_file: Path) -> None:
+    """Run strict structural validation over AST nodes before codegen."""
     errs: list[str] = []
     for item in prog.items:
         if type(item) not in _STRICT_TOP_LEVEL:
@@ -404,6 +429,7 @@ def _strict_validate_program(prog: Program, src_file: Path) -> None:
 
 
 def _build_native_llvm(ir_text: str, out_path: str, src_file: Path, *, profile: str, triple: str | None, freestanding: bool, opt_size: bool = False):
+    """Compile LLVM IR into a native executable using clang and runtime sources."""
     clang = shutil.which("clang")
     if clang is None:
         raise RuntimeError(f"CODEGEN {src_file}:1:1: native target requires `clang` in PATH")
@@ -511,6 +537,7 @@ def _parse_files_parallel(file_paths: list[Path]) -> dict[Path, Any]:
 
 
 def _merge_programs(asts: dict[Path, Any]) -> Any:
+    """Merge per-file AST programs into a single combined Program."""
     """Merge multiple AST programs into a single program."""
     from astra.ast import Program
 
@@ -544,7 +571,14 @@ def build(
     profile_compile: bool = False,
     threads: int | None = None,
     opt_size: bool = False,
+    profile_layout: bool = False,
+    opt_layout: bool = False,
+    profile_values: bool = False,
+    opt_value_profile: bool = False,
+    cpu_dispatch: bool = False,
+    cpu_target: str = "baseline",
 ):
+    """Compile an ASTRA program to the selected backend target."""
     src_file = Path(src_path)
     print(f"Building {src_file} -> {out_path} (target: {target})")
     
@@ -557,23 +591,83 @@ def build(
     
     if profile not in {"debug", "release"}:
         raise RuntimeError(f"BUILD {src_file}:1:1: unsupported profile {profile}")
+
+    if profile_layout and target == "py":
+        raise RuntimeError(f"BUILD {src_file}:1:1: --profile-layout requires llvm or native target")
+    if opt_layout and target == "py":
+        raise RuntimeError(f"BUILD {src_file}:1:1: --opt-layout requires llvm or native target")
+    if profile_values and target == "py":
+        raise RuntimeError(f"BUILD {src_file}:1:1: --profile-values requires llvm or native target")
+    if opt_value_profile and target == "py":
+        raise RuntimeError(f"BUILD {src_file}:1:1: --opt-value-profile requires llvm or native target")
+    if profile_layout and opt_layout:
+        raise RuntimeError(f"BUILD {src_file}:1:1: --profile-layout and --opt-layout are mutually exclusive")
+    if profile_values and opt_value_profile:
+        raise RuntimeError(f"BUILD {src_file}:1:1: --profile-values and --opt-value-profile are mutually exclusive")
+    if cpu_dispatch and target == "py":
+        raise RuntimeError(f"BUILD {src_file}:1:1: --cpu-dispatch requires llvm or native target")
+    if cpu_target not in {"baseline", "avx2", "native"}:
+        raise RuntimeError(f"BUILD {src_file}:1:1: unsupported cpu target {cpu_target}")
+    if not cpu_dispatch and cpu_target != "baseline":
+        raise RuntimeError(f"BUILD {src_file}:1:1: --cpu-target requires --cpu-dispatch")
+
+    effective_cpu_target = cpu_target if cpu_dispatch else "baseline"
     overflow_mode = _resolve_overflow_mode(profile, overflow, check=False)
-    digest = _build_fingerprint(src_file, target, emit_ir, strict, freestanding, profile, overflow_mode, triple, opt_size)
+    digest = _build_fingerprint(src_file, target, emit_ir, strict, freestanding, profile, overflow_mode, triple, opt_size, profile_layout, opt_layout, profile_values, opt_value_profile, cpu_dispatch, effective_cpu_target)
     cache_key = (
         f"{src_file.resolve().as_posix()}::{target}::{int(bool(strict))}::{int(bool(freestanding))}::"
-        f"{int(bool(emit_ir))}::{profile}::{overflow_mode}::{triple or ''}::{int(bool(opt_size))}"
+        f"{int(bool(emit_ir))}::{profile}::{overflow_mode}::{triple or ''}::{int(bool(opt_size))}::{int(bool(profile_layout))}::{int(bool(opt_layout))}::{int(bool(profile_values))}::{int(bool(opt_value_profile))}::{int(bool(cpu_dispatch))}::{effective_cpu_target}"
     )
     cache = json.loads(CACHE.read_text()) if CACHE.exists() else {}
     if cache.get(cache_key) == digest and Path(out_path).exists():
         print(f"Using cached build for {src_file}")
+        if profile_layout:
+            profile_path = Path(".build") / "astra-profile.json"
+            if not profile_path.exists():
+                cached_ir = ""
+                if target == "llvm":
+                    cached_ir = Path(out_path).read_text()
+                else:
+                    cached_src = src_file.read_text()
+                    cached_prog = parse(cached_src, filename=str(src_file))
+                    run_comptime(cached_prog, filename=str(src_file), overflow_mode=overflow_mode)
+                    analyze(cached_prog, filename=str(src_file), freestanding=freestanding)
+                    entry = "_start" if (freestanding and target == "native") else "main"
+                    prune_unreachable_items(cached_prog, entry=entry)
+                    optimize_program(cached_prog)
+                    if opt_value_profile:
+                        apply_value_specialization(cached_prog, load_value_profile())
+                    cached_ir = to_llvm_ir(
+                        cached_prog,
+                        freestanding=freestanding,
+                        overflow_mode=overflow_mode,
+                        triple=triple,
+                        profile=profile,
+                        cpu_dispatch=cpu_dispatch,
+                        cpu_target=effective_cpu_target,
+                    )
+                write_profile_template([], cached_ir)
+                print("Wrote layout profile template to .build/astra-profile.json")
+        if profile_values:
+            value_profile_path = Path(".build") / "value_profile.json"
+            if not value_profile_path.exists():
+                cached_src = src_file.read_text()
+                cached_prog = parse(cached_src, filename=str(src_file))
+                run_comptime(cached_prog, filename=str(src_file), overflow_mode=overflow_mode)
+                analyze(cached_prog, filename=str(src_file), freestanding=freestanding)
+                entry = "_start" if (freestanding and target == "native") else "main"
+                prune_unreachable_items(cached_prog, entry=entry)
+                optimize_program(cached_prog)
+                write_value_profile_template(cached_prog)
+                print("Wrote value profile template to .build/value_profile.json")
         return 'cached'
-    
+
     print(f"Parsing {src_file}...")
-    
+
     # Collect all input files
     input_files = _collect_input_files(src_file)
     print(f"Found {len(input_files)} input files")
-    
+
     # Parse files (parallel if enabled and multiple files)
     if len(input_files) > 1 and is_parallel_enabled():
         asts = _parse_files_parallel(input_files)
@@ -629,7 +723,15 @@ def build(
     
     if strict:
         _strict_validate_program(prog, src_file)
-    
+
+    if profile_values:
+        write_value_profile_template(prog)
+        print("Wrote value profile template to .build/value_profile.json")
+
+    if opt_value_profile:
+        apply_value_specialization(prog, load_value_profile())
+        print("Applied value specialization pass")
+
     llvm_ir: str | None = None
     if target in {"llvm", "native"} or emit_ir:
         print("Generating LLVM IR...")
@@ -640,7 +742,22 @@ def build(
                 overflow_mode=overflow_mode,
                 triple=triple,
                 profile=profile,
+                cpu_dispatch=cpu_dispatch,
+                cpu_target=effective_cpu_target,
             )
+
+        if profile_layout:
+            function_names = [
+                "__astra_user_main" if (not freestanding and item.name == "main") else (item.symbol or item.name)
+                for item in prog.items
+                if isinstance(item, FnDecl)
+            ]
+            write_profile_template(function_names, llvm_ir)
+            print("Wrote layout profile template to .build/astra-profile.json")
+
+        if opt_layout:
+            llvm_ir = optimize_llvm_layout(llvm_ir, load_profile())
+            print("Applied profile-guided layout optimizer")
     
     if freestanding and llvm_ir is not None:
         _require_runtime_free_freestanding(llvm_ir, src_file)
