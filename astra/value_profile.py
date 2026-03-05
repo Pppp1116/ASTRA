@@ -110,7 +110,16 @@ def _rewrite_stmts(stmts: list[Any], fn_name: str, profile: dict[str, dict[str, 
     out: list[Any] = []
     for stmt in stmts:
         if isinstance(stmt, MatchStmt) and not getattr(stmt, '_value_specialized', False):
-            out.append(_specialize_match_stmt(stmt, fn_name, profile))
+            specialized = _specialize_match_stmt(stmt, fn_name, profile)
+            if isinstance(specialized, IfStmt):
+                specialized.then_body = _rewrite_stmts(specialized.then_body, fn_name, profile)
+                specialized.else_body = _rewrite_stmts(specialized.else_body, fn_name, profile)
+            elif isinstance(specialized, MatchStmt):
+                for i, (pat, body) in enumerate(specialized.arms):
+                    specialized.arms[i] = (pat, _rewrite_stmts(body, fn_name, profile))
+            elif hasattr(specialized, 'body') and isinstance(specialized.body, list):
+                specialized.body = _rewrite_stmts(specialized.body, fn_name, profile)
+            out.append(specialized)
             continue
         if isinstance(stmt, IfStmt):
             stmt.then_body = _rewrite_stmts(stmt.then_body, fn_name, profile)
@@ -123,7 +132,11 @@ def _rewrite_stmts(stmts: list[Any], fn_name: str, profile: dict[str, dict[str, 
 
 def _specialize_match_stmt(stmt: MatchStmt, fn_name: str, profile: dict[str, dict[str, Any]]) -> Any:
     key = _switch_key(fn_name, stmt)
-    case_counts = profile.get('switch_cases', {}).get(key, {})
+    legacy_key = _switch_key_legacy(fn_name, stmt)
+    case_counts: dict[str, Any] = {}
+    case_counts.update(profile.get('switch_cases', {}).get(legacy_key, {}))
+    for k, v in profile.get('switch_cases', {}).get(key, {}).items():
+        case_counts[k] = int(case_counts.get(k, 0)) + int(v)
     hot_value = _dominant_value(case_counts)
     if hot_value is None:
         return stmt
@@ -158,6 +171,13 @@ def _dominant_value(counts: dict[str, Any]) -> str | None:
 
 
 def _switch_key(fn_name: str, stmt: MatchStmt) -> str:
+    site_id = f"{stmt.line}:{stmt.col}:{stmt.pos}"
+    if isinstance(stmt.expr, Name):
+        return f'{fn_name}:{stmt.expr.value}:{site_id}'
+    return f'{fn_name}:match:{site_id}'
+
+
+def _switch_key_legacy(fn_name: str, stmt: MatchStmt) -> str:
     if isinstance(stmt.expr, Name):
         return f'{fn_name}:{stmt.expr.value}'
     return f'{fn_name}:match@{stmt.line}:{stmt.col}'

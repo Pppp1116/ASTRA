@@ -6,7 +6,7 @@ PYTEST := $(ASTRA_BIN)/pytest
 
 ASTRA_SOURCES := $(shell find . -name '*.astra' -print)
 
-.PHONY: help venv fmt fmt-check lint test e2e sync-runtime all
+.PHONY: help venv fmt fmt-check lint test e2e sync-runtime clean all
 
 help:
 	@echo "Available targets:"
@@ -48,3 +48,7 @@ all: fmt-check lint test
 
 sync-runtime:
 	python scripts/sync_runtime_asset.py
+
+
+clean:
+	rm -rf .build .astra-cache.json .pytest_cache

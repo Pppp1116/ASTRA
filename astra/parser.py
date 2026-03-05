@@ -133,6 +133,7 @@ class Parser:
         is_async: bool,
         is_packed: bool,
         is_multiversion: bool,
+        is_impl: bool,
     ) -> None:
         if decl_kind in {"import", "struct", "enum", "type alias"} and (is_unsafe or is_async):
             if decl_kind == "import":
@@ -152,6 +153,9 @@ class Parser:
             raise ParseError(self.errors[-1])
         if is_multiversion and decl_kind != "fn":
             self._err("@multiversion is only valid on fn declarations")
+            raise ParseError(self.errors[-1])
+        if is_impl and decl_kind != "fn":
+            self._err("impl is only valid on fn declarations")
             raise ParseError(self.errors[-1])
 
     def parse_top_level(self, doc: str):
@@ -192,6 +196,7 @@ class Parser:
                 is_async=is_async,
                 is_packed=is_packed,
                 is_multiversion=is_multiversion,
+                is_impl=is_impl,
             )
             return self.parse_import()
         if self.cur().kind == "struct":
@@ -201,6 +206,7 @@ class Parser:
                 is_async=is_async,
                 is_packed=is_packed,
                 is_multiversion=is_multiversion,
+                is_impl=is_impl,
             )
             return self.parse_struct(is_pub, doc, packed=is_packed)
         if self.cur().kind == "enum":
@@ -210,6 +216,7 @@ class Parser:
                 is_async=is_async,
                 is_packed=is_packed,
                 is_multiversion=is_multiversion,
+                is_impl=is_impl,
             )
             return self.parse_enum(is_pub, doc)
         if self.cur().kind == "type":
@@ -219,6 +226,7 @@ class Parser:
                 is_async=is_async,
                 is_packed=is_packed,
                 is_multiversion=is_multiversion,
+                is_impl=is_impl,
             )
             return self.parse_type_alias()
         if self.cur().kind == "extern":
@@ -228,6 +236,7 @@ class Parser:
                 is_async=is_async,
                 is_packed=is_packed,
                 is_multiversion=is_multiversion,
+                is_impl=is_impl,
             )
             return self.parse_extern_fn(is_pub, is_unsafe, doc)
         if self.cur().kind == "fn":
@@ -237,6 +246,7 @@ class Parser:
                 is_async=is_async,
                 is_packed=is_packed,
                 is_multiversion=is_multiversion,
+                is_impl=is_impl,
             )
             return self.parse_fn(is_pub, is_async, doc, is_impl=is_impl, is_unsafe=is_unsafe, multiversion=is_multiversion)
         if is_impl:

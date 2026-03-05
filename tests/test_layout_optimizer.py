@@ -88,3 +88,33 @@ bb1:                                              ; preds = %entry
 '''
     out = optimize_llvm_layout(ir, {"functions": {"f": 1}, "edges": {}, "indirect_calls": {}})
     assert "bb1:" in out
+
+
+def test_function_name_extractor_handles_quoted_symbols():
+    ir = '''define i64 @"with.dot-name"() {
+entry:
+  ret i64 0
+}
+
+define i64 @plain() {
+entry:
+  ret i64 0
+}
+'''
+    out = optimize_llvm_layout(ir, {"functions": {"with.dot-name": 10, "plain": 1}, "edges": {}, "indirect_calls": {}})
+    assert out.find('define i64 @"with.dot-name"()') < out.find('define i64 @plain()')
+
+
+def test_block_weight_does_not_confuse_bb1_with_bb10():
+    ir = '''define i64 @f() {
+entry:
+  br label %bb1
+bb1:
+  br label %bb10
+bb10:
+  ret i64 0
+}
+'''
+    profile = {"functions": {"f": 1}, "edges": {"f:bb10->bb1": 100, "f:bb1->bb10": 1}, "indirect_calls": {}}
+    out = optimize_llvm_layout(ir, profile)
+    assert "bb1:" in out and "bb10:" in out

@@ -20,11 +20,12 @@
   - `--opt-value-profile` reads `.build/value_profile.json` and enables value-specialization (hot-value fast paths and profile-guided indirect-call specialization hooks) before LLVM codegen
 - CPU multiversioning:
   - annotate hot loop-heavy functions with `@multiversion`
-  - `--cpu-dispatch` emits the multiversion set (`baseline`, `sse4`, `avx2`, `avx512`) plus a runtime dispatcher
-  - `--cpu-target baseline|avx2|native` selects emitted variants:
+  - `--cpu-dispatch` toggles emission of a runtime dispatcher; it does not by itself force all variants to be built
+  - `--cpu-target baseline|avx2|native` selects which variants are compiled:
     - `baseline` → `{baseline}`
     - `avx2` → `{baseline, sse4, avx2}`
-    - `native` → `{baseline, sse4, avx2, avx512}` (full set)
+    - `native` → `{baseline, sse4, avx2, avx512}`
+  - when `--cpu-dispatch` is also set, dispatcher selection is emitted over the variant set produced by `--cpu-target`
 - `--freestanding` enforces runtime-free semantics/codegen for LLVM/native outputs:
   - hosted/runtime builtins are rejected in semantic analysis
   - emitted LLVM IR cannot reference `astra_*` runtime symbols or non-LLVM external host symbols

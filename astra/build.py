@@ -598,12 +598,15 @@ def build(
         raise RuntimeError(f"BUILD {src_file}:1:1: --cpu-dispatch requires llvm or native target")
     if cpu_target not in {"baseline", "avx2", "native"}:
         raise RuntimeError(f"BUILD {src_file}:1:1: unsupported cpu target {cpu_target}")
+    if not cpu_dispatch and cpu_target != "baseline":
+        raise RuntimeError(f"BUILD {src_file}:1:1: --cpu-target requires --cpu-dispatch")
 
+    effective_cpu_target = cpu_target if cpu_dispatch else "baseline"
     overflow_mode = _resolve_overflow_mode(profile, overflow, check=False)
-    digest = _build_fingerprint(src_file, target, emit_ir, strict, freestanding, profile, overflow_mode, triple, opt_size, profile_layout, opt_layout, profile_values, opt_value_profile, cpu_dispatch, cpu_target)
+    digest = _build_fingerprint(src_file, target, emit_ir, strict, freestanding, profile, overflow_mode, triple, opt_size, profile_layout, opt_layout, profile_values, opt_value_profile, cpu_dispatch, effective_cpu_target)
     cache_key = (
         f"{src_file.resolve().as_posix()}::{target}::{int(bool(strict))}::{int(bool(freestanding))}::"
-        f"{int(bool(emit_ir))}::{profile}::{overflow_mode}::{triple or ''}::{int(bool(opt_size))}::{int(bool(profile_layout))}::{int(bool(opt_layout))}::{int(bool(profile_values))}::{int(bool(opt_value_profile))}::{int(bool(cpu_dispatch))}::{cpu_target}"
+        f"{int(bool(emit_ir))}::{profile}::{overflow_mode}::{triple or ''}::{int(bool(opt_size))}::{int(bool(profile_layout))}::{int(bool(opt_layout))}::{int(bool(profile_values))}::{int(bool(opt_value_profile))}::{int(bool(cpu_dispatch))}::{effective_cpu_target}"
     )
     cache = json.loads(CACHE.read_text()) if CACHE.exists() else {}
     if cache.get(cache_key) == digest and Path(out_path).exists():
@@ -611,7 +614,26 @@ def build(
         if profile_layout:
             profile_path = Path(".build") / "astra-profile.json"
             if not profile_path.exists():
-                cached_ir = Path(out_path).read_text()
+                cached_ir = ""
+                if target == "llvm":
+                    cached_ir = Path(out_path).read_text()
+                else:
+                    cached_src = src_file.read_text()
+                    cached_prog = parse(cached_src, filename=str(src_file))
+                    run_comptime(cached_prog, filename=str(src_file), overflow_mode=overflow_mode)
+                    analyze(cached_prog, filename=str(src_file), freestanding=freestanding)
+                    entry = "_start" if (freestanding and target == "native") else "main"
+                    prune_unreachable_items(cached_prog, entry=entry)
+                    optimize_program(cached_prog)
+                    cached_ir = to_llvm_ir(
+                        cached_prog,
+                        freestanding=freestanding,
+                        overflow_mode=overflow_mode,
+                        triple=triple,
+                        profile=profile,
+                        cpu_dispatch=cpu_dispatch,
+                        cpu_target=effective_cpu_target,
+                    )
                 write_profile_template([], cached_ir)
                 print("Wrote layout profile template to .build/astra-profile.json")
         if profile_values:
@@ -621,6 +643,9 @@ def build(
                 cached_prog = parse(cached_src, filename=str(src_file))
                 run_comptime(cached_prog, filename=str(src_file), overflow_mode=overflow_mode)
                 analyze(cached_prog, filename=str(src_file), freestanding=freestanding)
+                entry = "_start" if (freestanding and target == "native") else "main"
+                prune_unreachable_items(cached_prog, entry=entry)
+                optimize_program(cached_prog)
                 write_value_profile_template(cached_prog)
                 print("Wrote value profile template to .build/value_profile.json")
         return 'cached'
@@ -706,7 +731,7 @@ def build(
                 triple=triple,
                 profile=profile,
                 cpu_dispatch=cpu_dispatch,
-                cpu_target=cpu_target,
+                cpu_target=effective_cpu_target,
             )
 
         if profile_layout:

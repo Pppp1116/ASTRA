@@ -328,3 +328,23 @@ def test_cli_build_accepts_opt_size_flag(tmp_path: Path):
     rc = subprocess.call([sys.executable, "-m", "astra.cli", "build", str(src), "-o", str(out), "--opt-size"])
     assert rc == 0
     assert out.exists()
+
+
+def test_cli_build_rejects_cpu_target_without_dispatch(tmp_path: Path):
+    src = tmp_path / "ok.astra"
+    out = tmp_path / "ok.ll"
+    src.write_text("fn main() -> Int { return 0; }")
+    rc = subprocess.call([
+        sys.executable,
+        "-m",
+        "astra.cli",
+        "build",
+        str(src),
+        "-o",
+        str(out),
+        "--target",
+        "llvm",
+        "--cpu-target",
+        "avx2",
+    ])
+    assert rc != 0

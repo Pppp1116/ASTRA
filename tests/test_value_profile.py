@@ -32,7 +32,7 @@ def test_value_profile_template_written(tmp_path: Path, monkeypatch):
     assert f.exists()
     parsed = json.loads(f.read_text())
     assert parsed == payload
-    assert 'main__impl0:x' in payload['switch_cases']
+    assert any(k.startswith('main__impl0:x:') for k in payload['switch_cases'])
 
 
 def test_value_profile_specializes_dominant_match_case():
@@ -103,7 +103,7 @@ fn main() -> Int { return f(7); }
     ir = out.read_text()
     icmp_lines = [line for line in ir.splitlines() if 'icmp eq i64' in line]
     assert icmp_lines
-    assert ', 1' in icmp_lines[0]
+    assert any(', 1' in line for line in icmp_lines)
 
 
 def test_value_profile_uses_symbol_to_avoid_fn_name_collisions():
@@ -128,5 +128,34 @@ def test_value_profile_uses_symbol_to_avoid_fn_name_collisions():
         ]
     )
     payload = write_value_profile_template(prog)
-    assert 'f__impl0:x' in payload['switch_cases']
-    assert 'f__impl1:x' in payload['switch_cases']
+    assert any(k.startswith('f__impl0:x:') for k in payload['switch_cases'])
+    assert any(k.startswith('f__impl1:x:') for k in payload['switch_cases'])
+
+
+def test_value_profile_switch_key_includes_site_id_and_legacy_fallback():
+    prog = Program(
+        items=[
+            FnDecl(
+                name='main',
+                symbol='main__impl0',
+                generics=[],
+                params=[('x', 'Int')],
+                ret='Int',
+                body=[
+                    MatchStmt(
+                        expr=Name('x'),
+                        arms=[(Literal(0), [ReturnStmt(Literal(10))]), (Literal(1), [ReturnStmt(Literal(20))])],
+                        line=12,
+                        col=7,
+                        pos=33,
+                    )
+                ],
+            )
+        ]
+    )
+    payload = write_value_profile_template(prog)
+    site_keys = [k for k in payload['switch_cases'] if k.startswith('main__impl0:x:')]
+    assert site_keys
+    profile = {'switch_cases': {'main__impl0:x': {'0': 1, '1': 999}}, 'indirect_calls': {}, 'array_lengths': {}, 'common_integers': {}}
+    apply_value_specialization(prog, profile)
+    assert prog.items[0].body[0].__class__.__name__ == 'IfStmt'

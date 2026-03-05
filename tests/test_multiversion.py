@@ -79,3 +79,24 @@ fn main() -> Int { return hash(4); }
     ir = to_llvm_ir(prog, cpu_dispatch=True, cpu_target="native")
     assert "declare i32 @astra_cpu_has_avx2()" in ir
     assert "icmp ne i32" in ir
+
+
+def test_multiversion_candidate_detects_loop_inside_match_arm():
+    prog = parse(
+        """
+@multiversion
+fn hash(x: Int) -> Int {
+  match x {
+    0 => {
+      let mut i = 0;
+      while i < 3 { i += 1; }
+      return i;
+    }
+    _ => { return x; }
+  }
+}
+fn main() -> Int { return hash(4); }
+"""
+    )
+    ir = to_llvm_ir(prog, cpu_dispatch=True, cpu_target="native")
+    assert "@hash_baseline" in ir

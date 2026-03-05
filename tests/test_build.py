@@ -807,3 +807,31 @@ def test_cached_build_still_emits_missing_profile_templates(tmp_path: Path, monk
     assert st2 == "cached"
     assert layout_path.exists()
     assert value_path.exists()
+
+
+def test_build_rejects_cpu_target_without_dispatch(tmp_path: Path):
+    src = tmp_path / "main.astra"
+    out = tmp_path / "main.ll"
+    src.write_text("fn main() -> Int { return 0; }")
+    with pytest.raises(RuntimeError) as excinfo:
+        build(str(src), str(out), "llvm", cpu_target="avx2")
+    assert "--cpu-target requires --cpu-dispatch" in str(excinfo.value)
+
+
+@pytest.mark.skipif(
+    shutil.which("clang") is None,
+    reason="native target requires clang",
+)
+def test_cached_native_build_profile_layout_does_not_read_binary_as_text(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    src = tmp_path / "main.astra"
+    out = tmp_path / "main.exe"
+    src.write_text("fn main() -> Int { return 0; }")
+    st1 = build(str(src), str(out), "native", profile_layout=True)
+    assert st1 in {"built", "cached"}
+    profile = tmp_path / ".build" / "astra-profile.json"
+    if profile.exists():
+        profile.unlink()
+    st2 = build(str(src), str(out), "native", profile_layout=True)
+    assert st2 == "cached"
+    assert profile.exists()

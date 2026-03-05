@@ -67,8 +67,15 @@ def optimize_llvm_layout(llvm_ir: str, profile: dict[str, dict[str, int]]) -> st
 
 
 def _function_name(header: str) -> str:
-    m = re.search(r"@([A-Za-z_][\w\.]*)\(", header)
-    return m.group(1) if m else "<anon>"
+    m = re.search(r'@"([^"]+)"\(|@([A-Za-z_][\w\.]*)\(', header)
+    if not m:
+        return "<anon>"
+    quoted = m.group(1)
+    if quoted is not None:
+        return quoted
+    ident = m.group(2)
+    return ident if ident is not None else "<anon>"
+
 
 
 def _extract_functions(ir: str) -> list[tuple[str, dict[str, list[str]]]]:
@@ -149,7 +156,11 @@ def _block_weight(fn_name: str, block: str, edge_weights: dict[str, int]) -> int
     for k, w in edge_weights.items():
         if not k.startswith(f"{fn_name}:"):
             continue
-        if f"->{block}" in k or f":{block}->" in k:
+        edge_part = k.split(":", 1)[1]
+        if "->" not in edge_part:
+            continue
+        src, dst = edge_part.split("->", 1)
+        if src == block or dst == block:
             total += int(w)
     return total
 

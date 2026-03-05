@@ -2891,6 +2891,10 @@ def _has_loop(stmts: list[Any]) -> bool:
         if isinstance(st, IfStmt):
             if _has_loop(st.then_body) or _has_loop(st.else_body):
                 return True
+        if isinstance(st, MatchStmt):
+            for _, arm_body in st.arms:
+                if _has_loop(arm_body):
+                    return True
         if hasattr(st, "body") and isinstance(st.body, list):
             if _has_loop(st.body):
                 return True
@@ -2908,7 +2912,9 @@ def _variant_suffixes(cpu_target: str) -> list[str]:
         return ["baseline"]
     if cpu_target == "avx2":
         return ["baseline", "sse4", "avx2"]
-    return ["baseline", "sse4", "avx2", "avx512"]
+    if cpu_target == "avx512":
+        return ["baseline", "sse4", "avx2", "avx512"]
+    raise ValueError(f"unsupported cpu target '{cpu_target}', expected one of: baseline, avx2, avx512")
 
 
 def _variant_features(suffix: str) -> str | None:
@@ -2999,7 +3005,7 @@ def _declare_functions(ctx: _ModuleCtx, prog: Program, freestanding: bool) -> tu
             fnty = ir.FunctionType(_llvm_type(ctx, sig.ret), [_llvm_type(ctx, t) for t in sig.params])
             ctx.fn_map[key] = ir.Function(ctx.module, fnty, name=llvm_name)
             if item.multiversion and ctx.cpu_dispatch and _is_multiversion_candidate(item):
-                suffixes = _variant_suffixes(ctx.cpu_target)
+                suffixes = _variant_suffixes("avx512" if ctx.cpu_target == "native" else ctx.cpu_target)
                 ctx.multiversion_variants[key] = suffixes
                 for suf in suffixes:
                     vkey = f"{key}__mv_{suf}"
