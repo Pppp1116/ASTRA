@@ -83,10 +83,12 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 _TOOLCHAIN_STAMP: str | None = None
 
 def _hash(content: str) -> str:
+    """Return a deterministic SHA-256 hex digest for text content."""
     return hashlib.sha256(content.encode()).hexdigest()
 
 
 def _sha256_file(path: Path) -> str:
+    """Return the SHA-256 hex digest for a file on disk."""
     h = hashlib.sha256()
     with path.open("rb") as fh:
         while True:
@@ -98,6 +100,7 @@ def _sha256_file(path: Path) -> str:
 
 
 def _iter_tree_files(root: Path, suffixes: set[str] | None = None) -> list[Path]:
+    """Collect files under a directory, optionally filtered by suffix."""
     if not root.exists():
         return []
     out: list[Path] = []
@@ -111,6 +114,7 @@ def _iter_tree_files(root: Path, suffixes: set[str] | None = None) -> list[Path]
 
 
 def _toolchain_stamp() -> str:
+    """Compute and memoize a hash representing compiler/runtime inputs."""
     global _TOOLCHAIN_STAMP
     if _TOOLCHAIN_STAMP is not None:
         return _TOOLCHAIN_STAMP
@@ -131,6 +135,7 @@ def _toolchain_stamp() -> str:
 
 
 def _collect_input_files(src_file: Path) -> list[Path]:
+    """Discover transitive source inputs used to build the root file."""
     """Collect all input files (sequential for now)"""
     visited: set[Path] = set()
     stack: list[Path] = [src_file.resolve()]
@@ -177,6 +182,7 @@ def _build_fingerprint(
     cpu_dispatch: bool,
     cpu_target: str,
 ) -> str:
+    """Build a deterministic fingerprint payload hash for build caching."""
     inputs = [
         {"path": p.as_posix(), "sha256": _sha256_file(p)}
         for p in _collect_input_files(src_file)
@@ -208,6 +214,7 @@ def _build_fingerprint(
 
 
 def _resolve_overflow_mode(profile: str, overflow: str, *, check: bool = False) -> str:
+    """Resolve effective overflow behavior for the selected profile and mode."""
     if overflow not in {"trap", "wrap", "debug"}:
         raise RuntimeError(f"BUILD <input>:1:1: unsupported overflow mode {overflow}")
     if overflow == "trap":
@@ -408,6 +415,7 @@ def _strict_walk_stmt(st: object, errs: list[str]) -> None:
 
 
 def _strict_validate_program(prog: Program, src_file: Path) -> None:
+    """Run strict structural validation over AST nodes before codegen."""
     errs: list[str] = []
     for item in prog.items:
         if type(item) not in _STRICT_TOP_LEVEL:
@@ -422,6 +430,7 @@ def _strict_validate_program(prog: Program, src_file: Path) -> None:
 
 
 def _build_native_llvm(ir_text: str, out_path: str, src_file: Path, *, profile: str, triple: str | None, freestanding: bool, opt_size: bool = False):
+    """Compile LLVM IR into a native executable using clang and runtime sources."""
     clang = shutil.which("clang")
     if clang is None:
         raise RuntimeError(f"CODEGEN {src_file}:1:1: native target requires `clang` in PATH")
@@ -529,6 +538,7 @@ def _parse_files_parallel(file_paths: list[Path]) -> dict[Path, Any]:
 
 
 def _merge_programs(asts: dict[Path, Any]) -> Any:
+    """Merge per-file AST programs into a single combined Program."""
     """Merge multiple AST programs into a single program."""
     from astra.ast import Program
 

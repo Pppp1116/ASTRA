@@ -6,6 +6,7 @@ from astra.lexer import Token, lex
 
 
 class ParseError(SyntaxError):
+    """Parse-time syntax error raised by parser and recovery logic."""
     pass
 
 
@@ -35,10 +36,12 @@ ASSIGN_OPS = {"=", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>="}
 
 
 def _diag(code: str, filename: str, line: int, col: int, msg: str) -> str:
+    """Format a stable compiler diagnostic string with span info."""
     return f"{code} {filename}:{line}:{col}: {msg}"
 
 
 def _parse_int_literal(text: str) -> int:
+    """Parse decimal/hex/binary integer literal text into an int."""
     t = text.replace("_", "")
     if t.startswith(("0x", "0X")):
         return int(t[2:], 16)
@@ -48,10 +51,12 @@ def _parse_int_literal(text: str) -> int:
 
 
 def _parse_float_literal(text: str) -> float:
+    """Parse a float literal string supporting underscore separators."""
     return float(text.replace("_", ""))
 
 
 class Parser:
+    """Recursive-descent parser for ASTRA source tokens."""
     def __init__(self, src: str, filename: str = "<input>"):
         self.filename = filename
         self.toks = lex(src, filename=filename)
@@ -832,4 +837,5 @@ class Parser:
 
 
 def parse(src: str, filename: str = "<input>"):
+    """Parse source text into a Program AST."""
     return Parser(src, filename=filename).parse_program()

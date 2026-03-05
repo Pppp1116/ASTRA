@@ -13,6 +13,7 @@ from astra.formatter import fmt
 
 
 def cmd_build(a):
+    """Handle the CLI build subcommand."""
     state = build(
         a.input,
         a.output,
@@ -39,6 +40,7 @@ def cmd_build(a):
 
 
 def cmd_check(a):
+    """Handle the CLI check subcommand and format diagnostics."""
     modes = int(bool(a.stdin)) + int(bool(a.files)) + int(bool(a.input))
     if modes != 1:
         raise ValueError("check requires exactly one input mode: <input>, --files, or --stdin")
@@ -96,12 +98,14 @@ def cmd_check(a):
 
 
 def cmd_run(a):
+    """Build a Python target and execute it with provided arguments."""
     out = Path(".astra-build") / (Path(a.input).stem + ".py")
     build(a.input, str(out), "py", profile_compile=a.profile_compile, threads=a.threads, opt_size=getattr(a, "opt_size", False))
     raise SystemExit(subprocess.call([sys.executable, str(out)] + a.args))
 
 
 def cmd_test(a):
+    """Run project tests by category through pytest."""
     args = [sys.executable, "-m", "pytest", "-q"]
     if a.kind == "unit":
         args += ["-k", "not integration and not e2e"]
@@ -113,6 +117,7 @@ def cmd_test(a):
 
 
 def cmd_fmt(a):
+    """Format files in-place or verify formatting with --check."""
     bad: list[str] = []
     for path in a.files:
         fp = Path(path)
@@ -134,11 +139,13 @@ def cmd_fmt(a):
 
 
 def cmd_doc(a):
+    """Generate API/docs output from an ASTRA input file."""
     args = [a.input, "-o", a.output]
     doc_main(args)
 
 
 def cmd_selfhost(a):
+    """Report self-host compiler availability status."""
     print(
         "selfhost-unavailable: selfhost/compiler.astra is a placeholder file copier, "
         "not a real self-hosted compiler",
@@ -148,12 +155,14 @@ def cmd_selfhost(a):
 
 
 def _add_global_flags(ap: argparse.ArgumentParser) -> None:
+    """Register shared CLI flags used by multiple subcommands."""
     ap.add_argument("--profile-compile", action="store_true", dest="profile_compile")
     ap.add_argument("--profile-json", action="store_true", dest="profile_json")
     ap.add_argument("--threads", type=int, default=os.cpu_count())
 
 
 def cmd_bench(a):
+    """Benchmark build phases and print median timings as JSON."""
     # Run 3 times and report median per-phase and total. Always enable profiling.
     runs = []
     for _ in range(3):
@@ -206,6 +215,7 @@ def cmd_bench(a):
 
 
 def main(argv=None):
+    """CLI entrypoint that builds parser and dispatches subcommands."""
     p = argparse.ArgumentParser()
     sp = p.add_subparsers(dest="cmd", required=True)
 
