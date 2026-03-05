@@ -1414,6 +1414,32 @@ def _check_stmt(
         move.merge(move, loop_move)
         return
     if isinstance(st, ForStmt):
+        loop_var_ty: str
+        if isinstance(st.iterable, RangeExpr):
+            start_ty = _infer(st.iterable.start, scopes, fixed_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok)
+            end_ty = _infer(st.iterable.end, scopes, fixed_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok)
+            if not _is_int_type(start_ty) or not _is_int_type(end_ty):
+                raise SemanticError(_diag(filename, st.line, st.col, "range for-in expects integer bounds"))
+            _require_type(filename, st.line, st.col, start_ty, end_ty, "for-in range bounds")
+            loop_var_ty = _canonical_type(start_ty)
+        else:
+            iterable_ty = _infer(st.iterable, scopes, fixed_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok)
+            base_ty = _strip_ref(_canonical_type(iterable_ty))
+            if _is_vec_type(base_ty):
+                loop_var_ty = _vec_inner(base_ty)
+            elif _is_slice_type(base_ty):
+                loop_var_ty = _slice_inner(base_ty)
+            else:
+                raise SemanticError(_diag(filename, st.line, st.col, f"type {iterable_ty} is not iterable"))
+            if not _is_copy_type(loop_var_ty):
+                raise SemanticError(
+                    _diag(
+                        filename,
+                        st.line,
+                        st.col,
+                        f"for-in over {iterable_ty} currently requires Copy element type, got {loop_var_ty}",
+                    )
+                )
         loop_scopes = scopes + [{}]
         loop_fixed_scopes = fixed_scopes + [{}]
         loop_owned = owned.copy()
@@ -1421,55 +1447,9 @@ def _check_stmt(
         loop_move = move.copy()
         loop_borrow_scopes = borrow_scopes + [set()]
         loop_move_scopes = move_scopes + [{}]
-        if st.init is not None:
-            if isinstance(st.init, LetStmt):
-                _check_stmt(
-                    st.init,
-                    loop_scopes,
-                    loop_fixed_scopes,
-                    loop_borrow_scopes,
-                    loop_move_scopes,
-                    fn_groups,
-                    structs,
-                    enums,
-                    fn_ret,
-                    ref_param_names,
-                    loop_owned,
-                    loop_borrow,
-                    loop_move,
-                    filename,
-                    fn_name,
-                    loop_depth + 1,
-                    unsafe_ok,
-                )
-            else:
-                _infer(st.init, loop_scopes, loop_fixed_scopes, fn_groups, structs, enums, loop_owned, loop_borrow, loop_move, filename, fn_name, unsafe_ok)
-        if st.cond is not None:
-            cond_ty = _infer(st.cond, loop_scopes, loop_fixed_scopes, fn_groups, structs, enums, loop_owned, loop_borrow, loop_move, filename, fn_name, unsafe_ok)
-            _require_type(filename, st.line, st.col, "Bool", cond_ty, "for condition")
-        if st.step is not None:
-            if isinstance(st.step, AssignStmt):
-                _check_stmt(
-                    st.step,
-                    loop_scopes,
-                    loop_fixed_scopes,
-                    loop_borrow_scopes,
-                    loop_move_scopes,
-                    fn_groups,
-                    structs,
-                    enums,
-                    fn_ret,
-                    ref_param_names,
-                    loop_owned,
-                    loop_borrow,
-                    loop_move,
-                    filename,
-                    fn_name,
-                    loop_depth + 1,
-                    unsafe_ok,
-                )
-            else:
-                _infer(st.step, loop_scopes, loop_fixed_scopes, fn_groups, structs, enums, loop_owned, loop_borrow, loop_move, filename, fn_name, unsafe_ok)
+        loop_scopes[-1][st.var] = loop_var_ty
+        loop_fixed_scopes[-1][st.var] = True
+        loop_move_scopes[-1][st.var] = loop_move.moved.get(st.var, False)
         _check_block(
             st.body,
             loop_scopes,

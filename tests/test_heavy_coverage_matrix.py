@@ -85,11 +85,11 @@ fn main() -> Int {
         """
 fn main() -> Int {
   let mut acc = 0;
-  for let mut i = 0; i < 3; i += 1 {
-    defer print(i);
+  for i in 0..3 {
+    defer print("tick");
     acc += i;
   }
-  for let mut j = 4; j < 7; j += 1 {
+  for j in 4..7 {
     acc += j;
   }
   return acc;

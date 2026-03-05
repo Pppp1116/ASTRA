@@ -56,21 +56,21 @@ def test_continue_outside_loop_error():
 
 
 def test_for_condition_must_be_bool():
-    src = "fn main() -> Int { for ; 1; { return 0; } return 0; }"
-    try:
-        analyze(parse(src))
-        assert False
-    except SemanticError as e:
-        assert "for condition" in str(e)
-
-
-def test_for_in_requires_range_syntax():
-    src = "fn main() -> Int { let xs = [1, 2, 3]; for x in xs { return x; } return 0; }"
+    src = "fn main() -> Int { for let i = 0; i < 3; i += 1 { return 0; } return 0; }"
     try:
         analyze(parse(src))
         assert False
     except ParseError as e:
-        assert "for-in currently supports only range syntax" in str(e)
+        assert "for expects `for <ident> in <expr> { ... }`" in str(e)
+
+
+def test_for_in_rejects_non_iterable_type():
+    src = "fn main() -> Int { for x in 7 { return x; } return 0; }"
+    try:
+        analyze(parse(src))
+        assert False
+    except SemanticError as e:
+        assert "is not iterable" in str(e)
 
 
 def test_range_for_loop_typechecks():
@@ -84,6 +84,60 @@ fn main() -> Int {
 }
 """
     analyze(parse(src))
+
+
+def test_vec_for_loop_typechecks():
+    src = """
+fn main() -> Int {
+  let mut v: Vec<Int> = vec_new() as Vec<Int>;
+  drop vec_push(v, 2);
+  drop vec_push(v, 3);
+  let mut acc = 0;
+  for x in v { acc += x; }
+  return acc;
+}
+"""
+    analyze(parse(src))
+
+
+def test_slice_for_loop_typechecks():
+    src = """
+fn main(xs: &[Int]) -> Int {
+  let mut acc = 0;
+  for x in xs { acc += x; }
+  return acc;
+}
+"""
+    analyze(parse(src))
+
+
+def test_bytes_for_loop_typechecks():
+    src = """
+fn main() -> Int {
+  let b: Bytes = vec_from([1u8, 2u8, 3u8]);
+  let mut acc = 0;
+  for x in b { acc += x as Int; }
+  return acc;
+}
+"""
+    analyze(parse(src))
+
+
+def test_for_in_over_non_copy_elements_is_rejected():
+    src = """
+struct Boxed { x: Int }
+fn main() -> Int {
+  let mut xs: Vec<Boxed> = vec_new() as Vec<Boxed>;
+  drop vec_push(xs, Boxed(1));
+  for v in xs { return v.x; }
+  return 0;
+}
+"""
+    try:
+        analyze(parse(src))
+        assert False
+    except SemanticError as e:
+        assert "requires Copy element type" in str(e)
 
 
 def test_missing_import_is_semantic_error():

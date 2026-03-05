@@ -98,10 +98,11 @@ fn main() -> Int {{
 
 
 @pytest.mark.parametrize("ty", INT_WIDTH_TYPES)
-def test_fixed_in_for_initializer_is_immutable(ty: str):
+def test_for_loop_binding_is_immutable(ty: str):
     src = f"""
 fn main() -> Int {{
-  for fixed i: {ty} = 0 as {ty}; i < (2 as {ty}); i += (1 as {ty}) {{
+  for i in 0 as {ty}..(2 as {ty}) {{
+    i += 1 as {ty};
     print(i);
   }}
   return 0;

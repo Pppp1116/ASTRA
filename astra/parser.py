@@ -96,9 +96,13 @@ class Parser:
 
     def recover(self) -> None:
         sync = {";", "}", "fn", "impl", "struct", "enum", "type", "import", "extern", "pub", "async", "unsafe", "comptime", "EOF"}
+        start = self.i
         while self.cur().kind not in sync:
             self.i += 1
         if self.cur().kind in {";", "}"}:
+            self.i += 1
+        elif self.i == start and self.cur().kind != "EOF":
+            # Ensure forward progress even when the failing token is a sync token.
             self.i += 1
 
     def parse_program(self) -> Program:
@@ -476,114 +480,20 @@ class Parser:
         return ExprStmt(lhs, tok.pos, tok.line, tok.col)
 
     def parse_for(self, tok: Token) -> ForStmt:
-        if self.cur().kind == "IDENT" and self.peek().kind == "in":
-            ident = self.eat("IDENT")
-            self.eat("in")
-            start_expr = self.parse_expr()
-            if self.opt(".."):
-                dots_tok = self.toks[self.i - 1]
-                inclusive = bool(self.opt("="))
-                end_expr = self.parse_expr()
-                idx_name = ident.text
-                init = LetStmt(idx_name, start_expr, True, None, ident.pos, ident.line, ident.col)
-                cond = Binary(
-                    "<=" if inclusive else "<",
-                    Name(idx_name, ident.pos, ident.line, ident.col),
-                    end_expr,
-                    dots_tok.pos,
-                    dots_tok.line,
-                    dots_tok.col,
-                )
-                step = AssignStmt(
-                    Name(idx_name, ident.pos, ident.line, ident.col),
-                    "+=",
-                    Literal(1, dots_tok.pos, dots_tok.line, dots_tok.col),
-                    dots_tok.pos,
-                    dots_tok.line,
-                    dots_tok.col,
-                )
-                # Parse body and ensure `continue` doesn't skip the implicit step in backends
-                # that emit the step at the end of the loop body.
-                body = self.parse_block()
-
-                def _make_step_stmt() -> AssignStmt:
-                    return AssignStmt(
-                        Name(idx_name, ident.pos, ident.line, ident.col),
-                        "+=",
-                        Literal(1, dots_tok.pos, dots_tok.line, dots_tok.col),
-                        dots_tok.pos,
-                        dots_tok.line,
-                        dots_tok.col,
-                    )
-
-                def _patch_continues(stmts: list[Any]) -> list[Any]:
-                    out: list[Any] = []
-                    for s in stmts:
-                        # Do not descend into nested loops: their `continue` targets the inner loop.
-                        if isinstance(s, (WhileStmt, ForStmt)):
-                            out.append(s)
-                            continue
-
-                        if isinstance(s, ContinueStmt):
-                            out.append(_make_step_stmt())
-                            out.append(s)
-                            continue
-
-                        if isinstance(s, IfStmt):
-                            s.then_body = _patch_continues(s.then_body)
-                            s.else_body = _patch_continues(s.else_body)
-                            out.append(s)
-                            continue
-
-                        if isinstance(s, MatchStmt):
-                            s.arms = [(pat, _patch_continues(arm_body)) for (pat, arm_body) in s.arms]
-                            out.append(s)
-                            continue
-
-                        if isinstance(s, UnsafeStmt):
-                            s.body = _patch_continues(s.body)
-                            out.append(s)
-                            continue
-
-                        if isinstance(s, ComptimeStmt):
-                            s.body = _patch_continues(s.body)
-                            out.append(s)
-                            continue
-
-                        out.append(s)
-                    return out
-
-                body = _patch_continues(body)
-
-                # Keep the normal end-of-iteration step for non-continue paths.
-                step = _make_step_stmt()
-                return ForStmt(init, cond, step, body, tok.pos, tok.line, tok.col)
-            self._err("for-in currently supports only range syntax `start..end` or `start..=end`", self.cur())
+        if self.cur().kind != "IDENT" or self.peek().kind != "in":
+            self._err("for expects `for <ident> in <expr> { ... }`")
             raise ParseError(self.errors[-1])
-        init = None
-        if self.cur().kind != ";":
-            if self.cur().kind in {"let", "fixed"}:
-                init = self.parse_stmt()
-            else:
-                init = self.parse_expr()
-                self.eat(";")
-        else:
-            self.eat(";")
-        cond = None
-        if self.cur().kind != ";":
-            cond = self.parse_expr()
-        self.eat(";")
-        step = None
-        if self.cur().kind != "{":
-            lhs = self.parse_expr()
-            if self.cur().kind in ASSIGN_OPS:
-                op = self.eat(self.cur().kind).kind
-                rhs = self.parse_expr()
-                step = AssignStmt(lhs, op, rhs, tok.pos, tok.line, tok.col)
-            else:
-                step = lhs
+        ident = self.eat("IDENT")
+        self.eat("in")
+        start_or_iter = self.parse_expr()
+        iterable: Any = start_or_iter
+        if self.opt(".."):
+            dots_tok = self.toks[self.i - 1]
+            inclusive = bool(self.opt("="))
+            end_expr = self.parse_expr()
+            iterable = RangeExpr(start_or_iter, end_expr, inclusive, dots_tok.pos, dots_tok.line, dots_tok.col)
         body = self.parse_block()
-        return ForStmt(init, cond, step, body, tok.pos, tok.line, tok.col)
+        return ForStmt(ident.text, iterable, body, tok.pos, tok.line, tok.col)
 
     def parse_match(self, tok: Token) -> MatchStmt:
         expr = self.parse_expr()

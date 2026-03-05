@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from astra.ast import *
+from astra.for_lowering import lower_for_loops
 from astra.int_types import parse_int_type_name
 from astra.layout import LayoutError, layout_of_type
 
@@ -34,6 +35,7 @@ def _canonical_type(typ: str) -> str:
 
 def to_python(prog: Program, freestanding: bool = False, overflow_mode: str = "trap") -> str:
     global _PY_STRUCTS
+    lower_for_loops(prog)
     _PY_STRUCTS = {item.name: item for item in prog.items if isinstance(item, StructDecl)}
     main_entry = "main"
     for item in prog.items:
@@ -452,6 +454,9 @@ def _expr(e: Any) -> str:
     if isinstance(e, TypeAnnotated):
         return f"__astra_cast({_expr(e.expr)}, {_canonical_type(e.type_name)!r})"
     if isinstance(e, Unary):
+        if e.op in {"&", "&mut", "*"}:
+            # Python backend models references as plain object aliases.
+            return _expr(e.expr)
         if e.op == "!":
             return f"(not {_expr(e.expr)})"
         return f"({e.op}{_expr(e.expr)})"
@@ -593,29 +598,5 @@ def _stmt_py(st: Any, ind: int) -> list[str]:
             lines.append(f"{'    ' * (ind + 1)}pass")
         return lines
     if isinstance(st, ForStmt):
-        if isinstance(st.init, LetStmt) and isinstance(st.init.expr, Name) and st.init.expr.value == "<iter>" and st.step is None:
-            lines = [f"{p}for {st.init.name} in {_expr(st.cond)}:"]
-            for s in st.body:
-                lines.extend(_stmt_py(s, ind + 1))
-            if not st.body:
-                lines.append(f"{'    ' * (ind + 1)}pass")
-            return lines
-        lines: list[str] = []
-        if st.init:
-            if isinstance(st.init, LetStmt):
-                lines.extend(_stmt_py(st.init, ind))
-            else:
-                lines.append(f"{p}{_expr(st.init)}")
-        lines.append(f"{p}while {_expr(st.cond) if st.cond else 'True'}:")
-        if st.body:
-            for s in st.body:
-                lines.extend(_stmt_py(s, ind + 1))
-        if st.step:
-            if isinstance(st.step, AssignStmt):
-                lines.extend(_stmt_py(st.step, ind + 1))
-            else:
-                lines.append(f"{'    ' * (ind + 1)}{_expr(st.step)}")
-        if not st.body and st.step is None:
-            lines.append(f"{'    ' * (ind + 1)}pass")
-        return lines
+        raise CodegenError(_diag(st, "internal: unlowered for-in loop"))
     raise CodegenError(_diag(st, f"unsupported statement {type(st).__name__}"))

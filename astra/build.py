@@ -40,6 +40,7 @@ from astra.ast import (
     Name,
     NilLit,
     Program,
+    RangeExpr,
     ReturnStmt,
     SizeOfTypeExpr,
     SizeOfValueExpr,
@@ -54,6 +55,7 @@ from astra.ast import (
 )
 from astra.comptime import run_comptime
 from astra.codegen import to_python
+from astra.for_lowering import lower_for_loops
 from astra.llvm_codegen import to_llvm_ir
 from astra.module_resolver import (
     ModuleResolutionError,
@@ -212,6 +214,7 @@ _STRICT_EXPRS = {
     SizeOfValueExpr,
     AlignOfValueExpr,
     WildcardPattern,
+    RangeExpr,
 }
 _STRICT_UNARY_OPS = {"-", "!", "~", "&", "&mut", "*"}
 _STRICT_BINARY_OPS = {
@@ -282,6 +285,10 @@ def _strict_walk_expr(e: object, errs: list[str]) -> None:
     if isinstance(e, CastExpr):
         _strict_walk_expr(e.expr, errs)
         return
+    if isinstance(e, RangeExpr):
+        _strict_walk_expr(e.start, errs)
+        _strict_walk_expr(e.end, errs)
+        return
     if isinstance(e, (SizeOfTypeExpr, AlignOfTypeExpr, BitSizeOfTypeExpr, MaxValTypeExpr, MinValTypeExpr)):
         return
     if isinstance(e, (SizeOfValueExpr, AlignOfValueExpr)):
@@ -332,18 +339,7 @@ def _strict_walk_stmt(st: object, errs: list[str]) -> None:
             _strict_walk_stmt(x, errs)
         return
     if isinstance(st, ForStmt):
-        if st.init is not None:
-            if isinstance(st.init, LetStmt):
-                _strict_walk_stmt(st.init, errs)
-            else:
-                _strict_walk_expr(st.init, errs)
-        if st.cond is not None:
-            _strict_walk_expr(st.cond, errs)
-        if st.step is not None:
-            if isinstance(st.step, AssignStmt):
-                _strict_walk_stmt(st.step, errs)
-            else:
-                _strict_walk_expr(st.step, errs)
+        _strict_walk_expr(st.iterable, errs)
         for x in st.body:
             _strict_walk_stmt(x, errs)
         return
@@ -466,6 +462,7 @@ def build(
             raise RuntimeError(f"BUILD {src_file}:1:1: freestanding native target requires fn _start()")
     run_comptime(prog, filename=str(src_file), overflow_mode=overflow_mode)
     analyze(prog, filename=str(src_file), freestanding=freestanding)
+    lower_for_loops(prog)
     optimize_program(prog)
     if strict:
         _strict_validate_program(prog, src_file)

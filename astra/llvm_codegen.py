@@ -5,6 +5,7 @@ from typing import Any
 
 from astra.ast import *
 from astra.codegen import CodegenError
+from astra.for_lowering import lower_for_loops
 from astra.int_types import parse_int_type_name
 from astra.layout import LayoutError, layout_of_struct, layout_of_type
 from astra.semantic import analyze
@@ -2276,12 +2277,6 @@ def _collect_defer_sites(stmts: list[Any], out: list[DeferStmt]) -> None:
         elif isinstance(st, WhileStmt):
             _collect_defer_sites(st.body, out)
         elif isinstance(st, ForStmt):
-            if isinstance(st.init, LetStmt):
-                _collect_defer_sites([st.init], out)
-            elif isinstance(st.init, AssignStmt):
-                _collect_defer_sites([st.init], out)
-            if isinstance(st.step, AssignStmt):
-                _collect_defer_sites([st.step], out)
             _collect_defer_sites(st.body, out)
         elif isinstance(st, MatchStmt):
             for _, arm in st.arms:
@@ -2666,50 +2661,7 @@ def _compile_stmt(ctx: _ModuleCtx, state: _FnState, st: Any, overflow_mode: str)
         return
 
     if isinstance(st, ForStmt):
-        if st.init is not None:
-            if isinstance(st.init, LetStmt):
-                _compile_stmt(ctx, state, st.init, overflow_mode)
-            elif isinstance(st.init, AssignStmt):
-                _compile_stmt(ctx, state, st.init, overflow_mode)
-            else:
-                _compile_expr(ctx, state, st.init, overflow_mode=overflow_mode)
-
-        fn = state.fn_ir
-        cond_block = fn.append_basic_block("for_cond")
-        body_block = fn.append_basic_block("for_body")
-        step_block = fn.append_basic_block("for_step")
-        end_block = fn.append_basic_block("for_end")
-        b.branch(cond_block)
-
-        b.position_at_end(cond_block)
-        if st.cond is None:
-            c = ir.Constant(ir.IntType(1), 1)
-        else:
-            cond = _compile_expr(ctx, state, st.cond, overflow_mode=overflow_mode)
-            c = _coerce_value(ctx, state, cond.value, cond.ty, "Bool", st.cond)
-        b.cbranch(c, body_block, end_block)
-
-        b.position_at_end(body_block)
-        state.loop_stack.append((step_block, end_block))
-        for sub in st.body:
-            _compile_stmt(ctx, state, sub, overflow_mode)
-            if _is_terminated(state):
-                break
-        state.loop_stack.pop()
-        if not _is_terminated(state):
-            b.branch(step_block)
-
-        b.position_at_end(step_block)
-        if st.step is not None:
-            if isinstance(st.step, AssignStmt):
-                _compile_stmt(ctx, state, st.step, overflow_mode)
-            else:
-                _compile_expr(ctx, state, st.step, overflow_mode=overflow_mode)
-        if not _is_terminated(state):
-            b.branch(cond_block)
-
-        b.position_at_end(end_block)
-        return
+        raise CodegenError(_diag(st, "internal: unlowered for-in loop"))
 
     if isinstance(st, MatchStmt):
         fn = state.fn_ir
@@ -2952,6 +2904,7 @@ def to_llvm_ir(
 
     # Ensure semantic annotations (symbols/inferred types) are present for direct backend use.
     analyze(prog, filename="<input>", freestanding=freestanding)
+    lower_for_loops(prog)
 
     module = ir.Module(name="astra_module")
     module.triple = triple or binding.get_default_triple()

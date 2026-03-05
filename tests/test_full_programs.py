@@ -245,3 +245,43 @@ fn main() -> Int {
 """,
     )
     assert cp.returncode == 219
+
+
+def test_full_program_for_in_ranges(tmp_path: Path):
+    cp = _build_and_run(
+        tmp_path,
+        "for_in_ranges",
+        """
+fn main() -> Int {
+  let mut a = 0;
+  for i in 0..5 { a += i; }
+  let mut b = 0;
+  for i in 0..=5 { b += i; }
+  return a + b;
+}
+""",
+    )
+    assert cp.returncode == 25
+
+
+def test_full_program_for_in_vec_and_bytes(tmp_path: Path):
+    cp = _build_and_run(
+        tmp_path,
+        "for_in_vec_bytes",
+        """
+fn main() -> Int {
+  let mut v: Vec<Int> = vec_new() as Vec<Int>;
+  drop vec_push(v, 4);
+  drop vec_push(v, 5);
+  drop vec_push(v, 6);
+  let mut sum_v = 0;
+  for x in v { sum_v += x; }
+
+  let bs: Bytes = vec_from([1u8, 2u8, 3u8, 4u8]);
+  let mut sum_b = 0;
+  for b in bs { sum_b += b as Int; }
+  return sum_v + sum_b;
+}
+""",
+    )
+    assert cp.returncode == 25

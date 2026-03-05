@@ -42,6 +42,8 @@
 - `drop <expr>;` (consumes value and runs destructor immediately)
 - use `let _ = <expr>;` / `_ = <expr>;` to discard a value result
 - option coalescing: `<a> ?? <b>` where `<a>: Option<T>`
+- `for` loops use only `for <ident> in <iterable-expr> { ... }` (C-style `for init; cond; step` is not supported)
+  - iterables: ranges (`start..end`, `start..=end`), `Vec<T>`, slice refs (`&[T]`/`&mut [T]`), `Bytes`
 - immutable bindings: `fixed name[: Type] = expr;`
 - option literal: `none` (only valid in `Option<T>` context)
 - expression statements may discard values of any type

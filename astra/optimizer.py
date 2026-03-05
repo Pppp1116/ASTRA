@@ -3,10 +3,12 @@ from __future__ import annotations
 from typing import Any
 
 from astra.ast import *
+from astra.for_lowering import lower_for_loops
 from astra.int_types import parse_int_type_name
 
 
 def optimize_program(prog: Program) -> Program:
+    lower_for_loops(prog)
     for item in prog.items:
         if isinstance(item, FnDecl):
             for _ in range(8):

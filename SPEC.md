@@ -31,7 +31,7 @@ keyword         = "fn" | "let" | "fixed" | "return" | "if" | "else" | "while"
                 | "unsafe" | "impl" | "match" | "defer" | "drop"
                 | "comptime" | "none" | "in" | "as" | "sizeof" | "alignof" ;
 
-multi_op        = "&&=" | "||=" | "..." | "::" | "=>" | "->" | "==" | "!="
+multi_op        = "::" | "=>" | "->" | "==" | "!="
                 | "<=" | ">=" | "&&" | "||" | "??"
                 | "+=" | "-=" | "*=" | "/=" | "%="
                 | "&=" | "|=" | "^=" | "<<=" | ">>="
@@ -114,8 +114,9 @@ comptime_stmt   = "comptime" block ;
 
 if_stmt         = "if" expr block [ "else" block ] ;
 while_stmt      = "while" expr block ;
-for_stmt        = "for" ( ident "in" expr
-                | [ (let_stmt | fixed_stmt | expr ";") ] [expr] ";" [assign_or_expr] ) block ;
+for_stmt        = "for" ident "in" for_iterable block ;
+for_iterable    = range_iterable | expr ;
+range_iterable  = expr ( ".." | "..=" ) expr ;
 match_stmt      = "match" expr "{" { expr "=>" block [","] } "}" ;
 
 assign_stmt     = expr ( "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" | "<<=" | ">>=" ) expr ";" ;
@@ -127,6 +128,12 @@ Constraints:
 - `fixed` bindings are immutable and cannot be `mut`.
 - Expression statements may discard values of any type.
 - `return;` is only valid in `-> Void` functions.
+- `for` uses only `for <ident> in <iterable-expr> { ... }` syntax; C-style `for init; cond; step { ... }` is invalid.
+- Supported `for` iterables are:
+  - ranges: `start..end`, `start..=end`
+  - `Vec<T>`
+  - slices (`[T]`) behind references (`&[T]`, `&mut [T]`)
+  - `Bytes` (`Vec<u8>`)
 
 ## 4. Module Resolution
 

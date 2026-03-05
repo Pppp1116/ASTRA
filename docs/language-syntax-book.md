@@ -89,7 +89,7 @@ fn main() -> Int {
     acc += 1;
   }
 
-  for let mut i = 0; i < 3; i += 1 {
+  for i in 0..3 {
     acc += i;
   }
 
@@ -257,6 +257,9 @@ stmt         = let_stmt | fixed_stmt | comptime_stmt | defer_stmt | drop_stmt | 
 let_stmt     = "let" ["mut"] ident [":" type] "=" expr ";" ;
 fixed_stmt   = "fixed" ident [":" type] "=" expr ";" ;
 drop_stmt    = "drop" expr ";" ;
+for_stmt     = "for" ident "in" for_iterable block ;
+for_iterable = range_iterable | expr ;
+range_iterable = expr (".." | "..=") expr ;
 assign_stmt  = expr ("=" | "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" | "<<=" | ">>=") expr ";" ;
 expr         = coalesce_expr ;
 coalesce_expr = logic_or_expr { "??" logic_or_expr } ;

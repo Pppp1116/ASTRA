@@ -27,6 +27,21 @@ fn main() -> Int {
 }
 ```
 
+`for` also works over `Vec<T>`, slices (`&[T]`/`&mut [T]`), and `Bytes`:
+
+```astra
+fn main() -> Int {
+  let mut v: Vec<Int> = vec_new() as Vec<Int>;
+  drop vec_push(v, 4);
+  drop vec_push(v, 5);
+  let mut sum = 0;
+  for x in v {
+    sum += x;
+  }
+  return sum; // 9
+}
+```
+
 ## 3. Option values and coalesce
 
 ```astra

@@ -60,7 +60,9 @@ python build/hello.py
 - Freestanding builds avoid hosted entrypoint assumptions and are suitable for kernels/runtime stubs.
 - `defer expr;` runs cleanup logic at function exit.
 - `a ?? b` coalesces `Option<T>` values (`a: Option<T>`, `b: T`).
-- Range loops are supported as `for i in start..end { ... }` and `for i in start..=end { ... }`.
+- `for` loops use only `for <ident> in <iterable-expr> { ... }`:
+  - ranges: `start..end`, `start..=end`
+  - `Vec<T>`, slice refs (`&[T]`/`&mut [T]`), and `Bytes`
 - `match` supports wildcard arm `_` (must be the last arm).
 - Expression statements may discard values of any type; `drop expr;` remains available for explicit immediate destruction-style intent.
 - LLVM backend emits validated LLVM IR through `llvmlite` and native builds are performed by `clang`.

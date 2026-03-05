@@ -257,8 +257,7 @@ def _collect_locals_in_block(stmts, pos_line: int, pos_col: int, out: set[str]) 
                 return
             continue
         if isinstance(st, ForStmt):
-            if isinstance(st.init, LetStmt):
-                out.add(st.init.name)
+            out.add(st.var)
             if st.body and _contains_line(st.body[0], pos_line):
                 _collect_locals_in_block(st.body, pos_line, pos_col, out)
                 return

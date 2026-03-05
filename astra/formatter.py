@@ -77,6 +77,9 @@ def _fmt_expr(e) -> str:
         return f"[{', '.join(_fmt_expr(x) for x in e.elements)}]"
     if isinstance(e, StructLit):
         return f"{e.name}({', '.join(_fmt_expr(v) for _, v in e.fields)})"
+    if isinstance(e, RangeExpr):
+        dots = "..=" if e.inclusive else ".."
+        return f"{_fmt_expr(e.start)}{dots}{_fmt_expr(e.end)}"
     if isinstance(e, SizeOfTypeExpr):
         return f"sizeof({type_text(e.type_name)})"
     if isinstance(e, AlignOfTypeExpr):
@@ -147,40 +150,7 @@ def _fmt_stmt(st, ind: int) -> list[str]:
         out.append(f"{p}}}")
         return out
     if isinstance(st, ForStmt):
-        if (
-            isinstance(st.init, LetStmt)
-            and st.init.mut
-            and st.init.type_name is None
-            and isinstance(st.cond, Binary)
-            and st.cond.op in {"<", "<="}
-            and isinstance(st.cond.left, Name)
-            and st.cond.left.value == st.init.name
-            and isinstance(st.step, AssignStmt)
-            and st.step.op == "+="
-            and isinstance(st.step.target, Name)
-            and st.step.target.value == st.init.name
-            and isinstance(st.step.expr, Literal)
-            and st.step.expr.value == 1
-        ):
-            dots = "..=" if st.cond.op == "<=" else ".."
-            out = [f"{p}for {st.init.name} in {_fmt_expr(st.init.expr)}{dots}{_fmt_expr(st.cond.right)} {{"]
-            for s in st.body:
-                out.extend(_fmt_stmt(s, ind + 1))
-            out.append(f"{p}}}")
-            return out
-        init = ""
-        if isinstance(st.init, LetStmt):
-            init_kw = "fixed" if st.init.fixed else "let"
-            init_mut = "mut " if st.init.mut and not st.init.fixed else ""
-            init = f"{init_kw} {init_mut}{st.init.name} = {_fmt_expr(st.init.expr)}"
-        elif st.init is not None:
-            init = _fmt_expr(st.init)
-        cond = _fmt_expr(st.cond) if st.cond is not None else ""
-        if isinstance(st.step, AssignStmt):
-            step = f"{_fmt_expr(st.step.target)} {st.step.op} {_fmt_expr(st.step.expr)}"
-        else:
-            step = _fmt_expr(st.step) if st.step is not None else ""
-        out = [f"{p}for {init}; {cond}; {step} {{"]
+        out = [f"{p}for {st.var} in {_fmt_expr(st.iterable)} {{"]
         for s in st.body:
             out.extend(_fmt_stmt(s, ind + 1))
         out.append(f"{p}}}")

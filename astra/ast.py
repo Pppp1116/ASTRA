@@ -68,9 +68,8 @@ class LetStmt:
 
 @dataclass
 class ForStmt:
-    init: Any
-    cond: Any
-    step: Any
+    var: str
+    iterable: Any
     body: list[Any]
     pos: int = 0
     line: int = 0
@@ -402,6 +401,16 @@ class MaxValTypeExpr:
 @dataclass
 class MinValTypeExpr:
     type_name: Any
+    pos: int = 0
+    line: int = 0
+    col: int = 0
+
+
+@dataclass
+class RangeExpr:
+    start: Any
+    end: Any
+    inclusive: bool = False
     pos: int = 0
     line: int = 0
     col: int = 0

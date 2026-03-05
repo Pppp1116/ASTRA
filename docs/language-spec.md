@@ -29,7 +29,9 @@ drop_stmt = "drop" expr ";" ;
 return_stmt = "return" [expr] ";" ;
 if_stmt   = "if" expr block ["else" block] ;
 while_stmt = "while" expr block ;
-for_stmt  = "for" (ident "in" expr | [let_stmt | fixed_stmt | expr ";"] [expr] ";" [assign_stmt | expr]) block ;
+for_stmt  = "for" ident "in" for_iterable block ;
+for_iterable = range_iterable | expr ;
+range_iterable = expr (".." | "..=") expr ;
 assign_stmt = expr ("=" | "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" | "<<=" | ">>=") expr ";" ;
 expr      = coalesce_expr ;
 coalesce_expr = logic_or_expr { "??" logic_or_expr } ;
@@ -129,6 +131,12 @@ Conventions:
 - Expression statements may discard values of any type.
 - `drop expr;` remains accepted for explicit consumption/destruction-style flows (legacy-compatible syntax).
 - `return;` is valid only in functions returning `Void`.
+- `for` uses only `for <ident> in <iterable-expr> { ... }` syntax; C-style `for init; cond; step { ... }` is invalid.
+- Supported `for` iterables are:
+  - ranges: `start..end`, `start..=end`
+  - `Vec<T>`
+  - slices behind references (`&[T]`, `&mut [T]`)
+  - `Bytes` (`Vec<u8>`)
 - Unsized rules:
   - `str` is unsized; use behind references/pointers (for now typically `&str`).
   - `[T]` is unsized; use behind references/pointers (for now typically `&[T]` / `&mut [T]`).

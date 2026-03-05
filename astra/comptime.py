@@ -536,16 +536,20 @@ class _Evaluator:
                     return sig
             return None
         if isinstance(st, ForStmt):
-            if st.init is not None:
-                if isinstance(st.init, LetStmt):
-                    self.exec_stmt(st.init, env, env_types)
-                elif isinstance(st.init, AssignStmt):
-                    self.exec_stmt(st.init, env, env_types)
-                else:
-                    self.eval_expr(st.init, env, env_types)
-            while True:
-                if st.cond is not None and not bool(self.eval_expr(st.cond, env, env_types)):
-                    break
+            seq: list[object]
+            if isinstance(st.iterable, RangeExpr):
+                start = int(self.eval_expr(st.iterable.start, env, env_types))
+                end = int(self.eval_expr(st.iterable.end, env, env_types))
+                stop = end + 1 if st.iterable.inclusive else end
+                seq = list(range(start, stop))
+            else:
+                seq = list(self.eval_expr(st.iterable, env, env_types))
+            had_old = st.var in env
+            old_v = env.get(st.var)
+            old_ty = env_types.get(st.var)
+            for it in seq:
+                env[st.var] = it
+                env_types[st.var] = self._value_type(it)
                 for s in st.body:
                     sig = self.exec_stmt(s, env, env_types)
                     if not isinstance(sig, _LoopSignal):
@@ -553,13 +557,26 @@ class _Evaluator:
                     if sig.kind == "continue":
                         break
                     if sig.kind == "break":
+                        if had_old:
+                            env[st.var] = old_v
+                            if old_ty is not None:
+                                env_types[st.var] = old_ty
+                            else:
+                                env_types.pop(st.var, None)
+                        else:
+                            env.pop(st.var, None)
+                            env_types.pop(st.var, None)
                         return None
                     return sig
-                if st.step is not None:
-                    if isinstance(st.step, AssignStmt):
-                        self.exec_stmt(st.step, env, env_types)
-                    else:
-                        self.eval_expr(st.step, env, env_types)
+            if had_old:
+                env[st.var] = old_v
+                if old_ty is not None:
+                    env_types[st.var] = old_ty
+                else:
+                    env_types.pop(st.var, None)
+            else:
+                env.pop(st.var, None)
+                env_types.pop(st.var, None)
             return None
         if isinstance(st, ComptimeStmt):
             for s in st.body:
@@ -726,20 +743,7 @@ def _collect_runtime_name_uses_stmt(stmt: Any, out: set[str]) -> None:
             _collect_runtime_name_uses_stmt(s, out)
         return
     if isinstance(stmt, ForStmt):
-        if st_init := stmt.init:
-            if isinstance(st_init, LetStmt):
-                _collect_runtime_name_uses_stmt(st_init, out)
-            elif isinstance(st_init, AssignStmt):
-                _collect_runtime_name_uses_stmt(st_init, out)
-            else:
-                _collect_runtime_name_uses_expr(st_init, out)
-        if stmt.cond is not None:
-            _collect_runtime_name_uses_expr(stmt.cond, out)
-        if st_step := stmt.step:
-            if isinstance(st_step, AssignStmt):
-                _collect_runtime_name_uses_stmt(st_step, out)
-            else:
-                _collect_runtime_name_uses_expr(st_step, out)
+        _collect_runtime_name_uses_expr(stmt.iterable, out)
         for s in stmt.body:
             _collect_runtime_name_uses_stmt(s, out)
         return

@@ -12,6 +12,7 @@ astra/codegen.py
 astra/comptime.py
 astra/debugger.py
 astra/docgen.py
+astra/for_lowering.py
 astra/formatter.py
 astra/int_types.py
 astra/layout.py

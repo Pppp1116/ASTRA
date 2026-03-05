@@ -445,14 +445,13 @@ def test_non_exhaustive_bool_match_is_semantic_error():
         assert "non-exhaustive match for Bool" in str(e)
 
 
-def test_for_step_assign_codegen_is_emitted(tmp_path: Path):
+def test_for_in_is_lowered_with_index_step_codegen(tmp_path: Path):
     src = tmp_path / "for.astra"
     out = tmp_path / "for.py"
     src.write_text(
         """
 fn main() -> Int {
-  let mut x = 0;
-  for ; x < 3; x += 1 {
+  for x in 0..3 {
     print(x);
   }
   return 0;
@@ -461,7 +460,8 @@ fn main() -> Int {
     )
     build(str(src), str(out), "py")
     text = out.read_text()
-    assert "x += 1" in text
+    assert "while" in text
+    assert "+= 1" in text
 
 
 def test_match_codegen_executes_branch(tmp_path: Path):

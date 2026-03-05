@@ -23,6 +23,7 @@ from astra.ast import (
     MaxValTypeExpr,
     MinValTypeExpr,
     Name,
+    RangeExpr,
     SizeOfTypeExpr,
     SizeOfValueExpr,
     StructDecl,
@@ -55,12 +56,12 @@ import stdlib::io as io;
 pub struct Point { x Int, y Int }
 enum Color { Red, Green, Blue }
 pub fn main() -> Int {
-  let mut x = 0;
-  for ; x < 10; x += 1 {
-    if x == 5 { break; }
+  let mut stop = 5;
+  for x in 0..10 {
+    if x == stop { break; }
     continue;
   }
-  x = 5;
+  stop = 7;
   return 0;
 }
 """
@@ -77,7 +78,7 @@ pub fn main() -> Int {
     assert isinstance(fn.body[2], AssignStmt) and fn.body[2].op == "="
 
 
-def test_parse_range_for_desugars_to_cstyle_loop():
+def test_parse_range_for_builds_for_in_range_expr():
     src = """
 fn main() -> Int {
   let mut total = 0;
@@ -91,12 +92,11 @@ fn main() -> Int {
     fn = prog.items[0]
     loop = fn.body[1]
     assert isinstance(loop, ForStmt)
-    assert isinstance(loop.init, LetStmt)
-    assert loop.init.name == "i"
-    assert isinstance(loop.init.expr, Literal) and loop.init.expr.value == 1
-    assert isinstance(loop.cond, Binary) and loop.cond.op == "<"
-    assert isinstance(loop.step, AssignStmt) and loop.step.op == "+="
-    assert isinstance(loop.step.target, Name) and loop.step.target.value == "i"
+    assert loop.var == "i"
+    assert isinstance(loop.iterable, RangeExpr)
+    assert isinstance(loop.iterable.start, Literal) and loop.iterable.start.value == 1
+    assert isinstance(loop.iterable.end, Literal) and loop.iterable.end.value == 4
+    assert not loop.iterable.inclusive
 
 
 def test_parse_range_for_inclusive_uses_lte_condition():
@@ -105,8 +105,17 @@ def test_parse_range_for_inclusive_uses_lte_condition():
     fn = prog.items[0]
     loop = fn.body[0]
     assert isinstance(loop, ForStmt)
-    assert isinstance(loop.cond, Binary)
-    assert loop.cond.op == "<="
+    assert isinstance(loop.iterable, RangeExpr)
+    assert loop.iterable.inclusive
+
+
+def test_parse_for_rejects_c_style_loop():
+    bad = "fn main() -> Int { for let i = 0; i < 3; i += 1 { } return 0; }"
+    try:
+        parse(bad)
+        assert False
+    except ParseError as e:
+        assert "for expects `for <ident> in <expr> { ... }`" in str(e)
 
 
 def test_parse_match_accepts_wildcard_pattern():

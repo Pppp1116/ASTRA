@@ -46,3 +46,13 @@ def test_check_reports_parse_error_with_phase_code_and_span():
     assert first.span.filename == "mem://parse.astra"
     assert first.span.line == 1
     assert first.span.col > 1
+
+
+def test_check_reports_c_style_for_as_parse_error():
+    src = "fn main() -> Int { for let i = 0; i < 3; i += 1 { } return 0; }"
+    res = run_check_source(src, filename="mem://for.astra")
+    assert not res.ok
+    first = res.diagnostics[0]
+    assert first.phase == "PARSE"
+    assert first.code.startswith("ASTRA-PARSE-")
+    assert "for expects `for <ident> in <expr> { ... }`" in first.message
