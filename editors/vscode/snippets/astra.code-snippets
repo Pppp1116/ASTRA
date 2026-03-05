@@ -1,0 +1,61 @@
+{
+  "Function": {
+    "prefix": "fn",
+    "body": [
+      "fn ${1:name}(${2:arg}: ${3:Int}) -> ${4:Void} {",
+      "    ${0}",
+      "}"
+    ],
+    "description": "Declare an Astra function"
+  },
+  "If Else": {
+    "prefix": "if",
+    "body": [
+      "if ${1:condition} {",
+      "    ${2}",
+      "} else {",
+      "    ${0}",
+      "}"
+    ],
+    "description": "If/else block"
+  },
+  "For In": {
+    "prefix": "for",
+    "body": [
+      "for ${1:item} in ${2:iterable} {",
+      "    ${0}",
+      "}"
+    ],
+    "description": "For-in loop"
+  },
+  "Match": {
+    "prefix": "match",
+    "body": [
+      "match ${1:value} {",
+      "    ${2:pattern} => {",
+      "        ${3}",
+      "    },",
+      "    _ => {",
+      "        ${0}",
+      "    },",
+      "}"
+    ],
+    "description": "Match expression"
+  },
+  "Struct": {
+    "prefix": "struct",
+    "body": [
+      "struct ${1:Name} {",
+      "    ${2:field}: ${3:Int},",
+      "}"
+    ],
+    "description": "Struct declaration"
+  },
+  "Import Std": {
+    "prefix": "impstd",
+    "body": [
+      "import std.${1:io};"
+    ],
+    "description": "Import from Astra stdlib"
+  }
+}

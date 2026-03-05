@@ -1,0 +1,3 @@
+fn sha256(s: String) -> String { return __sha256(s); }
+fn hmac_sha256(key: String, data: String) -> String { return __hmac_sha256(key, data); }
+fn digest_pair(a: String, b: String) -> String { return sha256(a + ":" + b); }

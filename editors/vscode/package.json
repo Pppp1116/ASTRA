@@ -1,0 +1,131 @@
+{
+  "name": "astra-language",
+  "displayName": "Astra Language",
+  "description": "VS Code support for Astra via the astlsp language server.",
+  "version": "0.2.0",
+  "publisher": "astra-lang",
+  "engines": {
+    "vscode": "^1.88.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "keywords": [
+    "astra",
+    "language",
+    "lsp"
+  ],
+  "activationEvents": [
+    "onLanguage:astra",
+    "onCommand:astra.restartLanguageServer",
+    "onCommand:astra.showLanguageServerStatus",
+    "onCommand:astra.openExtensionLog"
+  ],
+  "files": [
+    "extension.js",
+    "language-configuration.json",
+    "syntaxes/**",
+    "snippets/**",
+    "server/**",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "astra",
+        "aliases": [
+          "Astra",
+          "astra"
+        ],
+        "extensions": [
+          ".astra"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "astra",
+        "scopeName": "source.astra",
+        "path": "./syntaxes/astra.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "astra",
+        "path": "./snippets/astra.code-snippets"
+      }
+    ],
+    "commands": [
+      {
+        "command": "astra.restartLanguageServer",
+        "title": "Astra: Restart Language Server"
+      },
+      {
+        "command": "astra.showLanguageServerStatus",
+        "title": "Astra: Show Language Server Status"
+      },
+      {
+        "command": "astra.openExtensionLog",
+        "title": "Astra: Open Extension Log"
+      }
+    ],
+    "configuration": {
+      "title": "Astra",
+      "properties": {
+        "astra.languageServer.mode": {
+          "type": "string",
+          "enum": [
+            "bundled",
+            "external"
+          ],
+          "default": "bundled",
+          "description": "How to start the language server. Bundled uses the server shipped inside this extension."
+        },
+        "astra.languageServer.command": {
+          "type": "string",
+          "default": "",
+          "description": "Executable used to launch the Astra language server in external mode."
+        },
+        "astra.languageServer.pythonPath": {
+          "type": "string",
+          "default": "",
+          "description": "Python executable used for bundled server mode (optional override)."
+        },
+        "astra.languageServer.args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Additional command line arguments passed to the external Astra language server."
+        },
+        "astra.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Trace level for language server protocol logs."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "lint": "echo 'No lint step configured'",
+    "package": "vsce package --allow-missing-repository"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.88.0",
+    "@vscode/vsce": "^3.6.2"
+  },
+  "license": "MIT"
+}

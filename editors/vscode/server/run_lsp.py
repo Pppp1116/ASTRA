@@ -1,0 +1,15 @@
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(ROOT))
+os.environ.setdefault("ASTRA_STDLIB_PATH", str(ROOT / "astra" / "stdlib"))
+
+from astra.lsp import main
+
+
+if __name__ == "__main__":
+    main()

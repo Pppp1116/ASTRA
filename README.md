@@ -25,6 +25,7 @@ python build/hello.py
 - `docs/TOUR.md`: quick language walkthrough
 - `docs/SPEC_COMPLIANCE.md`: SPEC-to-implementation/test mapping
 - `docs/DIAGNOSTICS.md`: stable `astra check --json` diagnostic codes
+- `editors/vscode`: VS Code extension (syntax + LSP client for `astlsp`)
 
 ## Build options
 - `astra build <in> -o <out> [--target py|llvm|native] [--emit-ir path.ll] [--strict] [--freestanding] [--profile debug|release] [--overflow trap|wrap|debug] [--triple <llvm-triple>]`

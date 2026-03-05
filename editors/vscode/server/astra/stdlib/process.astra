@@ -1,0 +1,27 @@
+/// std.process – environment and process helpers (hosted only).
+fn exit(code: Int) -> Never { return __proc_exit(code); }
+
+fn env(name: String) -> String { return __env_get(name); }
+
+fn env_or(name: String, fallback: String) -> String {
+  let value = env(name);
+  if len(value) == 0 {
+    return fallback;
+  }
+  return value;
+}
+
+fn cwd() -> String { return __cwd(); }
+
+fn run(cmd: String) -> Int { return __proc_run(cmd); }
+
+fn run_ok(cmd: String) -> Bool { return run(cmd) == 0; }
+
+/// Print a message to stderr using the host shell. This is a best-effort
+/// helper intended for diagnostics in hosted mode.
+/// The message is passed via printf inside single quotes so that shell
+/// metacharacters (; $ ` etc.) are not interpreted.
+fn eprintln(msg: String) -> Int {
+  return run("printf '%s\\n' '" + msg + "' 1>&2");
+}
+

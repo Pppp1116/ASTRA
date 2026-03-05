@@ -1,0 +1,81 @@
+pub enum Option<T> {
+  None,
+  Some(T),
+}
+
+pub enum Result<T, E> {
+  Ok(T),
+  Err(E),
+}
+
+type Bytes = Vec<u8>;
+
+fn add_checked(a: Int, b: Int) -> Int? {
+  let r = a + b;
+  if b > 0 && r < a {
+    return none;
+  }
+  if b < 0 && r > a {
+    return none;
+  }
+  return r;
+}
+
+fn sub_checked(a: Int, b: Int) -> Int? {
+  let r = a - b;
+  if b > 0 && r > a {
+    return none;
+  }
+  if b < 0 && r < a {
+    return none;
+  }
+  return r;
+}
+
+fn mul_checked(a: Int, b: Int) -> Int? {
+  if a == 0 || b == 0 {
+    return 0;
+  }
+  if (a == minVal(Int) && b == -1) || (b == minVal(Int) && a == -1) {
+    return none;
+  }
+  let r = a * b;
+  if r / b != a {
+    return none;
+  }
+  return r;
+}
+
+fn div_checked(a: Int, b: Int) -> Int? {
+  if b == 0 {
+    return none;
+  }
+  if a == minVal(Int) && b == -1 {
+    return none;
+  }
+  return a / b;
+}
+
+fn rem_checked(a: Int, b: Int) -> Int? {
+  if b == 0 {
+    return none;
+  }
+  if a == minVal(Int) && b == -1 {
+    return none;
+  }
+  return a % b;
+}
+
+fn shl_checked(a: Int, n: Int) -> Int? {
+  if n < 0 || n >= bitSizeOf(Int) {
+    return none;
+  }
+  return a << n;
+}
+
+fn shr_checked(a: Int, n: Int) -> Int? {
+  if n < 0 || n >= bitSizeOf(Int) {
+    return none;
+  }
+  return a >> n;
+}

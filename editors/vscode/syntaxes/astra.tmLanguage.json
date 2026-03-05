@@ -1,0 +1,90 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Astra",
+  "scopeName": "source.astra",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#keywords" },
+    { "include": "#types" },
+    { "include": "#functions" },
+    { "include": "#operators" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        { "name": "comment.line.double-slash.astra", "match": "//.*$" },
+        {
+          "name": "comment.block.astra",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.astra",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            { "name": "constant.character.escape.astra", "match": "\\\\." }
+          ]
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.integer.astra",
+          "match": "\\b\\d+(?:[iu]\\d+)?\\b"
+        },
+        {
+          "name": "constant.numeric.float.astra",
+          "match": "\\b\\d+\\.\\d+(?:[eE][+-]?\\d+)?\\b"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.astra",
+          "match": "\\b(fn|let|fixed|return|if|else|while|for|in|break|continue|match|drop|defer|comptime|import|type|struct|enum|extern|pub|unsafe|async|await)\\b"
+        },
+        {
+          "name": "keyword.operator.coalesce.astra",
+          "match": "\\?\\?"
+        },
+        {
+          "name": "constant.language.astra",
+          "match": "\\b(true|false|none)\\b"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "support.type.primitive.astra",
+          "match": "\\b(Void|Bool|Int|Float|String|Bytes|Never|isize|usize|i(?:[1-9]|[1-9][0-9]|1[01][0-9]|12[0-8])|u(?:[1-9]|[1-9][0-9]|1[01][0-9]|12[0-8]))\\b"
+        }
+      ]
+    },
+    "functions": {
+      "patterns": [
+        {
+          "name": "entity.name.function.astra",
+          "match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\s*(?=\\()"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.astra",
+          "match": "->|=>|==|!=|<=|>=|&&|\\|\\||[+\\-*/%<>=!&|^~]"
+        }
+      ]
+    }
+  }
+}
