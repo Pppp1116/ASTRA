@@ -151,7 +151,7 @@ def test_cli_check_stdin_json_reports_stable_codes():
         text=True,
     )
     assert proc.returncode != 0
-    assert '"code": "ASTRA-TYPE-0001"' in proc.stdout
+    assert '"code": "E0100"' in proc.stdout
 
 
 def test_cli_check_files_mode_reports_errors(tmp_path: Path):
@@ -165,7 +165,7 @@ def test_cli_check_files_mode_reports_errors(tmp_path: Path):
         text=True,
     )
     assert proc.returncode != 0
-    assert "ASTRA-TYPE-0001" in proc.stderr
+    assert "E0100" in proc.stderr
 
 
 def test_cli_fmt_and_doc_subcommands(tmp_path: Path):

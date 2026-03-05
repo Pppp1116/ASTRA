@@ -81,22 +81,13 @@ def cmd_check(a):
         }
         print(json.dumps(payload, indent=2, sort_keys=True))
     else:
+        for diag in result.diagnostics:
+            print(format_diagnostic(diag), file=sys.stderr)
         if result.ok:
             if len(result.files_checked) > 1:
                 print(f"ok ({len(result.files_checked)} files)")
             else:
                 print("ok")
-        else:
-            for diag in result.diagnostics:
-                print(format_diagnostic(diag), file=sys.stderr)
-                for note in diag.notes:
-                    if note.span is None:
-                        print(f"  note: {note.message}", file=sys.stderr)
-                    else:
-                        print(
-                            f"  note: {note.span.filename}:{note.span.line}:{note.span.col}: {note.message}",
-                            file=sys.stderr,
-                        )
     if not result.ok:
         raise SystemExit(1)
 

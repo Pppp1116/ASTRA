@@ -69,7 +69,7 @@ def test_lsp_helpers_and_main_dispatch(monkeypatch):
     assert astra.lsp._word_at("fn main() -> Int {}", 0, 1) == "fn"
     diags = astra.lsp._parse_diagnostics('fn main() -> Int { return "x"; }', "<mem>")
     assert diags
-    assert diags[0]["code"] == "ASTRA-TYPE-0001"
+    assert diags[0]["code"] == "E0100"
 
     src = (
         "fn add(x Int) -> Int { return x; }\n"
@@ -119,10 +119,23 @@ def test_lsp_helpers_and_main_dispatch(monkeypatch):
     )
     by_id = {m.get("id"): m for m in sent if m.get("id") is not None}
     assert by_id[1]["result"]["capabilities"]["definitionProvider"] is True
+    assert by_id[1]["result"]["capabilities"]["codeActionProvider"] is True
     assert "Int" in by_id[2]["result"]["contents"]["value"]
     labels = {x["label"] for x in by_id[3]["result"]}
     assert {"y", "add", "S", "E", "print", "fn"} <= labels
     assert by_id[4]["result"] is not None
+
+    semicolon_diags = astra.lsp._parse_diagnostics("fn main() -> Int { let x = 1 return 0; }", "u")
+    assert semicolon_diags
+    assert semicolon_diags[0]["code"] == "E0301"
+    action_result = srv._code_actions(
+        {
+            "textDocument": {"uri": "u"},
+            "context": {"diagnostics": semicolon_diags},
+        }
+    )
+    assert action_result
+    assert action_result[0]["kind"] == "quickfix"
 
 
 def test_debugger_and_profiler_and_runtime(tmp_path: Path):

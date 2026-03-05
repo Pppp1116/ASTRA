@@ -358,9 +358,27 @@ def _diag_to_lsp(diag, primary_uri: str, primary_filename: str) -> dict[str, Any
         },
         "severity": _SEVERITY_MAP.get(getattr(diag, "severity", "error"), 1),
         "source": "astra",
-        "code": getattr(diag, "code", "ASTRA-SEM-9999"),
+        "code": getattr(diag, "code", "E9999"),
         "message": getattr(diag, "message", "unknown error"),
     }
+    suggestions = []
+    for s in getattr(diag, "suggestions", ()):
+        if getattr(s, "span", None) is None:
+            suggestions.append({"message": s.message, "replacement": s.replacement, "range": None})
+            continue
+        s_span = s.span
+        suggestions.append(
+            {
+                "message": s.message,
+                "replacement": s.replacement,
+                "range": {
+                    "start": {"line": max(0, s_span.line - 1), "character": max(0, s_span.col - 1)},
+                    "end": {"line": max(0, s_span.end_line - 1), "character": max(0, s_span.end_col - 1)},
+                },
+            }
+        )
+    if suggestions:
+        item["data"] = {"suggestions": suggestions}
     related = []
     for note in getattr(diag, "notes", ()):
         if note.span is None:
@@ -848,6 +866,44 @@ class LSPServer:
             }
         ]
 
+    def _code_actions(self, params: dict[str, Any]) -> list[dict[str, Any]]:
+        text_doc = params.get("textDocument", {})
+        uri = text_doc.get("uri", "")
+        context = params.get("context", {})
+        diagnostics = context.get("diagnostics", [])
+        actions: list[dict[str, Any]] = []
+        seen: set[tuple[str, str, str, str, str]] = set()
+
+        for diag in diagnostics:
+            data = diag.get("data", {})
+            suggestions = data.get("suggestions", []) if isinstance(data, dict) else []
+            for s in suggestions:
+                rng = s.get("range")
+                replacement = s.get("replacement")
+                if replacement is None or rng is None:
+                    continue
+                key = (
+                    str(diag.get("code", "")),
+                    str(rng.get("start", {}).get("line", "")),
+                    str(rng.get("start", {}).get("character", "")),
+                    str(rng.get("end", {}).get("line", "")),
+                    str(rng.get("end", {}).get("character", "")),
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+                actions.append(
+                    {
+                        "title": s.get("message") or "Apply suggested fix",
+                        "kind": "quickfix",
+                        "isPreferred": True,
+                        "diagnostics": [diag],
+                        "edit": {"changes": {uri: [{"range": rng, "newText": replacement}]}},
+                    }
+                )
+
+        return actions[:50]
+
     def _scan_workspace(self) -> None:
         for root in self.workspace_folders:
             if not root.exists():
@@ -993,6 +1049,7 @@ class LSPServer:
                             "documentSymbolProvider": True,
                             "workspaceSymbolProvider": True,
                             "documentFormattingProvider": True,
+                            "codeActionProvider": True,
                         }
                     },
                 )
@@ -1109,6 +1166,11 @@ class LSPServer:
                 p = msg.get("params", {})
                 uri = p.get("textDocument", {}).get("uri", "")
                 self._respond(msg_id, self._format_document(uri))
+                return True
+
+            if method == "textDocument/codeAction":
+                p = msg.get("params", {})
+                self._respond(msg_id, self._code_actions(p))
                 return True
 
             if msg_id is not None:

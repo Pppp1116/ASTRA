@@ -1,40 +1,53 @@
 # Astra Diagnostic Codes
 
-This table documents the stable codes emitted by `astra check --json`.
+Stable diagnostics are emitted by `astra check` and `astra check --json`.
 
-## Lex (`LEX`)
-
-| Code | Meaning |
-| --- | --- |
-| `ASTRA-LEX-0001` | Unterminated string literal |
-| `ASTRA-LEX-0002` | Unterminated character literal |
-| `ASTRA-LEX-0003` | Unterminated block comment |
-| `ASTRA-LEX-0004` | Invalid numeric literal |
-| `ASTRA-LEX-9999` | Other lexer diagnostic |
-
-## Parse (`PARSE`)
+## Error Codes
 
 | Code | Meaning |
 | --- | --- |
-| `ASTRA-PARSE-0001` | Expected-token parse error (`expected ...`) |
-| `ASTRA-PARSE-0002` | Unexpected token/atom parse error |
-| `ASTRA-PARSE-0003` | Unexpected EOF during parsing |
-| `ASTRA-PARSE-9999` | Other parser diagnostic |
+| `E0001` | Syntax error (generic lexer/parser) |
+| `E0002` | Unexpected token |
+| `E0003` | Unexpected end of input |
+| `E0004` | Unterminated block comment |
+| `E0005` | Invalid numeric literal |
+| `E0100` | Type mismatch |
+| `E0101` | Invalid numeric/operator type usage |
+| `E0102` | Wrong number of function arguments |
+| `E0103` | Missing required return |
+| `E0104` | Illegal assignment to immutable/fixed binding |
+| `E0105` | Attempted call on non-function value |
+| `E0110` | Invalid pattern match arm |
+| `E0111` | Non-exhaustive pattern match |
+| `E0200` | Unknown identifier |
+| `E0201` | Unknown function |
+| `E0202` | Import/module resolution failure |
+| `E0203` | Unknown field |
+| `E0204` | Missing required field |
+| `E0300` | Missing/invalid punctuation |
+| `E0301` | Missing semicolon |
+| `E0302` | Invalid control-flow syntax usage |
+| `E0400` | Borrowing rule violation |
+| `E0401` | Use-after-move |
+| `E0402` | Use-after-free |
+| `E0403` | Owned allocation leak |
+| `E0500` | Unsafe context required |
+| `E0501` | Hosted API used in freestanding mode |
+| `E0600` | Invalid or missing program entrypoint |
+| `E0700` | Compile-time execution error |
+| `E0701` | Integer overflow detected |
+| `E9999` | Unknown/internal diagnostic fallback |
 
-## Semantic (`SEM`)
+## Warning Codes
 
 | Code | Meaning |
 | --- | --- |
-| `ASTRA-TYPE-0001` | Type mismatch |
-| `ASTRA-MOD-0001` | Import/module resolution failure |
-| `ASTRA-NAME-0001` | Undefined name |
-| `ASTRA-NAME-0002` | Undefined function |
-| `ASTRA-ENTRY-0001` | Missing entrypoint (`main` or `_start`, depending on build mode) |
-| `ASTRA-CFG-0001` | Control-flow misuse (for example `break`/`continue` outside loops) |
-| `ASTRA-COMPTIME-0001` | Compile-time execution error |
-| `ASTRA-SEM-9999` | Other semantic diagnostic |
+| `W0001` | Unreachable code |
+| `W0002` | Unused variable |
+| `W9999` | Unknown warning fallback |
 
 ## Notes
 
-- Codes are assigned in `astra/check.py` (`_code_for`).
-- Type mismatch diagnostics include structured notes (`context`, `expected`, `got`) when available.
+- Diagnostics are normalized in `astra/check.py`.
+- Human output and JSON output use the same underlying diagnostics.
+- LSP diagnostics reuse these codes and can expose quick fixes when a suggestion has an edit.
