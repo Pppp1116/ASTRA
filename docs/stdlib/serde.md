@@ -26,3 +26,8 @@ Current limits:
 - No derive/auto-impl support
 - No streaming parser/encoder
 - No structured error location information
+
+Near-term direction:
+
+- Add typed decode entrypoints and derive-based serialization hooks
+- Improve diagnostics for schema/type mismatches during decode

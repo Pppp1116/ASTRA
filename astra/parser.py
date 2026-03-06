@@ -300,6 +300,7 @@ class Parser:
         is_pub = False
         is_unsafe = False
         is_async = False
+        is_gpu = False
         is_packed = False
         link_libs: list[str] = []
         while True:
@@ -311,6 +312,10 @@ class Parser:
                 continue
             if self.opt("async"):
                 is_async = True
+                continue
+            if self.cur().kind == "IDENT" and self.cur().text == "gpu" and self.peek().kind == "fn":
+                self.i += 1
+                is_gpu = True
                 continue
             if self.opt("@"):
                 attr = self.eat("IDENT").text
@@ -335,8 +340,8 @@ class Parser:
             if link_libs:
                 self._err("@link is only valid on extern function declarations")
                 raise ParseError(self.errors[-1])
-            if is_unsafe or is_async:
-                self._err("import cannot be prefixed with unsafe/async")
+            if is_unsafe or is_async or is_gpu:
+                self._err("import cannot be prefixed with unsafe/async/gpu")
                 raise ParseError(self.errors[-1])
             if is_packed:
                 self._err("@packed is only valid on struct declarations")
@@ -346,16 +351,16 @@ class Parser:
             if link_libs:
                 self._err("@link is only valid on extern function declarations")
                 raise ParseError(self.errors[-1])
-            if is_unsafe or is_async:
-                self._err("struct cannot be prefixed with unsafe/async")
+            if is_unsafe or is_async or is_gpu:
+                self._err("struct cannot be prefixed with unsafe/async/gpu")
                 raise ParseError(self.errors[-1])
             return self.parse_struct(is_pub, doc, packed=is_packed)
         if self.cur().kind == "enum":
             if link_libs:
                 self._err("@link is only valid on extern function declarations")
                 raise ParseError(self.errors[-1])
-            if is_unsafe or is_async:
-                self._err("enum cannot be prefixed with unsafe/async")
+            if is_unsafe or is_async or is_gpu:
+                self._err("enum cannot be prefixed with unsafe/async/gpu")
                 raise ParseError(self.errors[-1])
             if is_packed:
                 self._err("@packed is only valid on struct declarations")
@@ -365,8 +370,8 @@ class Parser:
             if link_libs:
                 self._err("@link is only valid on extern function declarations")
                 raise ParseError(self.errors[-1])
-            if is_unsafe or is_async:
-                self._err("trait cannot be prefixed with unsafe/async")
+            if is_unsafe or is_async or is_gpu:
+                self._err("trait cannot be prefixed with unsafe/async/gpu")
                 raise ParseError(self.errors[-1])
             if is_packed:
                 self._err("@packed is only valid on struct declarations")
@@ -376,14 +381,17 @@ class Parser:
             if link_libs:
                 self._err("@link is only valid on extern function declarations")
                 raise ParseError(self.errors[-1])
-            if is_unsafe or is_async:
-                self._err("type alias cannot be prefixed with unsafe/async")
+            if is_unsafe or is_async or is_gpu:
+                self._err("type alias cannot be prefixed with unsafe/async/gpu")
                 raise ParseError(self.errors[-1])
             if is_packed:
                 self._err("@packed is only valid on struct declarations")
                 raise ParseError(self.errors[-1])
             return self.parse_type_alias()
         if self.cur().kind == "extern":
+            if is_gpu:
+                self._err("extern functions cannot be prefixed with gpu")
+                raise ParseError(self.errors[-1])
             if is_packed:
                 self._err("@packed is only valid on struct declarations")
                 raise ParseError(self.errors[-1])
@@ -395,12 +403,15 @@ class Parser:
             if link_libs:
                 self._err("@link is only valid on extern function declarations")
                 raise ParseError(self.errors[-1])
-            return self.parse_fn(is_pub, is_async, doc, is_unsafe=is_unsafe)
+            return self.parse_fn(is_pub, is_async, doc, is_unsafe=is_unsafe, is_gpu=is_gpu)
         if self._looks_like_binding_start():
-            if link_libs or is_packed or is_pub or is_async:
+            if link_libs or is_packed or is_pub or is_async or is_gpu:
                 self._err("top-level bindings cannot use declaration modifiers or attributes")
                 raise ParseError(self.errors[-1])
             return self.parse_global_binding(is_unsafe=is_unsafe)
+        if is_gpu:
+            self._err("gpu modifier is only valid before fn declarations")
+            raise ParseError(self.errors[-1])
         if link_libs:
             self._err("@link is only valid on extern function declarations")
             raise ParseError(self.errors[-1])
@@ -563,6 +574,7 @@ class Parser:
         is_async: bool = False,
         doc: str = "",
         is_unsafe: bool = False,
+        is_gpu: bool = False,
     ) -> FnDecl:
         """Parse the `fn` grammar production from the token stream.
         
@@ -598,6 +610,7 @@ class Parser:
             unsafe=is_unsafe,
             doc=doc,
             where_bounds=where_bounds,
+            gpu_kernel=is_gpu,
             pos=fn_tok.pos,
             line=fn_tok.line,
             col=fn_tok.col,

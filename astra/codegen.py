@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from astra.ast import *
 from astra.for_lowering import lower_for_loops
+from astra.gpu.kernel_lowering import lower_gpu_kernels
 from astra.int_types import parse_int_type_name
 from astra.layout import LayoutError, layout_of_type
 
@@ -39,6 +41,157 @@ def _canonical_type(typ: str) -> str:
     return t
 
 
+def _is_gpu_memory_type_name(typ: str) -> bool:
+    t = _canonical_type(type_text(typ)).replace(" ", "")
+    return t.startswith("GpuBuffer<") or t.startswith("GpuSlice<") or t.startswith("GpuMutSlice<")
+
+
+def _gpu_barrier_expr(expr: Any) -> bool:
+    return (
+        isinstance(expr, Call)
+        and isinstance(expr.fn, FieldExpr)
+        and isinstance(expr.fn.obj, Name)
+        and expr.fn.obj.value == "gpu"
+        and expr.fn.field == "barrier"
+        and len(expr.args) == 0
+    )
+
+
+def _gpu_cuda_expr(expr: Any, *, array_params: set[str]) -> str:
+    if isinstance(expr, Name):
+        return expr.value
+    if isinstance(expr, BoolLit):
+        return "True" if expr.value else "False"
+    if isinstance(expr, Literal):
+        if isinstance(expr.value, (int, float)):
+            return repr(expr.value)
+        raise CodegenError(_diag(expr, "CUDA lowering only supports numeric literals in kernels"))
+    if isinstance(expr, Unary):
+        if expr.op == "!":
+            return f"(not {_gpu_cuda_expr(expr.expr, array_params=array_params)})"
+        if expr.op in {"-", "+", "~"}:
+            return f"({expr.op}{_gpu_cuda_expr(expr.expr, array_params=array_params)})"
+        raise CodegenError(_diag(expr, f"unsupported unary op `{expr.op}` in CUDA kernel lowering"))
+    if isinstance(expr, CastExpr):
+        return _gpu_cuda_expr(expr.expr, array_params=array_params)
+    if isinstance(expr, TypeAnnotated):
+        return _gpu_cuda_expr(expr.expr, array_params=array_params)
+    if isinstance(expr, Binary):
+        if expr.op == "??":
+            raise CodegenError(_diag(expr, "CUDA lowering does not support `??` in kernels"))
+        op = BIN_OP_MAP.get(expr.op, expr.op)
+        return (
+            f"({_gpu_cuda_expr(expr.left, array_params=array_params)} "
+            f"{op} "
+            f"{_gpu_cuda_expr(expr.right, array_params=array_params)})"
+        )
+    if isinstance(expr, IndexExpr):
+        return (
+            f"{_gpu_cuda_expr(expr.obj, array_params=array_params)}"
+            f"[{_gpu_cuda_expr(expr.index, array_params=array_params)}]"
+        )
+    if isinstance(expr, Call):
+        if isinstance(expr.fn, FieldExpr) and isinstance(expr.fn.obj, Name):
+            obj = expr.fn.obj.value
+            field = expr.fn.field
+            if obj == "gpu":
+                if expr.args:
+                    raise CodegenError(_diag(expr, f"gpu.{field} expects 0 args in CUDA lowering"))
+                mapping = {
+                    "global_id": "cuda.grid(1)",
+                    "thread_id": "cuda.threadIdx.x",
+                    "block_id": "cuda.blockIdx.x",
+                    "block_dim": "cuda.blockDim.x",
+                    "grid_dim": "cuda.gridDim.x",
+                }
+                if field in mapping:
+                    return mapping[field]
+                if field == "barrier":
+                    raise CodegenError(_diag(expr, "gpu.barrier must be used as statement in CUDA lowering"))
+            if obj in array_params and field == "len" and len(expr.args) == 0:
+                return f"{obj}.shape[0]"
+        raise CodegenError(_diag(expr, "unsupported call form in CUDA kernel lowering"))
+    raise CodegenError(_diag(expr, f"unsupported CUDA kernel expression {type(expr).__name__}"))
+
+
+def _gpu_cuda_target(target: Any, *, array_params: set[str]) -> str:
+    if isinstance(target, Name):
+        return target.value
+    if isinstance(target, IndexExpr):
+        return (
+            f"{_gpu_cuda_expr(target.obj, array_params=array_params)}"
+            f"[{_gpu_cuda_expr(target.index, array_params=array_params)}]"
+        )
+    raise CodegenError(_diag(target, f"unsupported CUDA assignment target {type(target).__name__}"))
+
+
+def _gpu_cuda_stmts(body: list[Any], *, ind: int, array_params: set[str]) -> list[str]:
+    p = "    " * ind
+    out: list[str] = []
+    for st in body:
+        if isinstance(st, LetStmt):
+            out.append(f"{p}{st.name} = {_gpu_cuda_expr(st.expr, array_params=array_params)}")
+            continue
+        if isinstance(st, AssignStmt):
+            out.append(
+                f"{p}{_gpu_cuda_target(st.target, array_params=array_params)} "
+                f"{st.op} "
+                f"{_gpu_cuda_expr(st.expr, array_params=array_params)}"
+            )
+            continue
+        if isinstance(st, ExprStmt):
+            if _gpu_barrier_expr(st.expr):
+                out.append(f"{p}cuda.syncthreads()")
+            else:
+                out.append(f"{p}{_gpu_cuda_expr(st.expr, array_params=array_params)}")
+            continue
+        if isinstance(st, IfStmt):
+            out.append(f"{p}if {_gpu_cuda_expr(st.cond, array_params=array_params)}:")
+            then_lines = _gpu_cuda_stmts(st.then_body, ind=ind + 1, array_params=array_params)
+            out.extend(then_lines or [f"{p}    pass"])
+            if st.else_body:
+                out.append(f"{p}else:")
+                else_lines = _gpu_cuda_stmts(st.else_body, ind=ind + 1, array_params=array_params)
+                out.extend(else_lines or [f"{p}    pass"])
+            continue
+        if isinstance(st, WhileStmt):
+            out.append(f"{p}while {_gpu_cuda_expr(st.cond, array_params=array_params)}:")
+            loop_lines = _gpu_cuda_stmts(st.body, ind=ind + 1, array_params=array_params)
+            out.extend(loop_lines or [f"{p}    pass"])
+            continue
+        if isinstance(st, ReturnStmt):
+            if st.expr is None:
+                out.append(f"{p}return")
+            else:
+                out.append(f"{p}return {_gpu_cuda_expr(st.expr, array_params=array_params)}")
+            continue
+        if isinstance(st, BreakStmt):
+            out.append(f"{p}break")
+            continue
+        if isinstance(st, ContinueStmt):
+            out.append(f"{p}continue")
+            continue
+        raise CodegenError(_diag(st, f"unsupported CUDA kernel statement {type(st).__name__}"))
+    return out
+
+
+def _emit_cuda_kernel_source(item: FnDecl, symbol: str) -> tuple[str, str]:
+    if not bool(getattr(item, "gpu_kernel", False)):
+        return "", ""
+    array_params = {name for name, typ in item.params if _is_gpu_memory_type_name(typ)}
+    safe_name = re.sub(r"[^0-9A-Za-z_]", "_", symbol)
+    fn_name = f"__astra_cuda_kernel_{safe_name}"
+    params = ", ".join(name for name, _ in item.params)
+    try:
+        body_lines = _gpu_cuda_stmts(item.body, ind=1, array_params=array_params)
+    except CodegenError:
+        return "", ""
+    if not body_lines:
+        body_lines = ["    return"]
+    src = "\n".join([f"def {fn_name}({params}):", *body_lines, ""]) + "\n"
+    return src, fn_name
+
+
 def to_python(
     prog: Program,
     freestanding: bool = False,
@@ -59,6 +212,7 @@ def to_python(
     """
     global _PY_STRUCTS
     lower_for_loops(prog)
+    gpu_ir_payload = lower_gpu_kernels(prog).to_dict()
     _PY_STRUCTS = {item.name: item for item in prog.items if isinstance(item, StructDecl)}
     main_entry = "main"
     for item in prog.items:
@@ -68,8 +222,10 @@ def to_python(
     lines = [
         "# generated by astra",
         "import asyncio, ctypes, hashlib, hmac, inspect, json, os, pathlib, socket, subprocess, sys, threading, time",
+        "from astra.gpu.runtime import get_runtime as _astra_gpu_get_runtime",
     ]
     lines += [
+        "_astra_gpu_runtime = _astra_gpu_get_runtime()",
         "_astra_heap = {}",
         "_astra_next_ptr = 1",
         "_astra_threads = {}",
@@ -304,6 +460,37 @@ def to_python(
         "    v = int(x) & mask",
         "    k = int(n) % width",
         "    return ((v >> k) | (v << ((width - k) % width))) & mask",
+        f"_astra_gpu_runtime.register_ir({gpu_ir_payload!r})",
+        "class _AstraGpuNamespace:",
+        "    def __init__(self, runtime):",
+        "        self._runtime = runtime",
+        "    def available(self):",
+        "        return self._runtime.available()",
+        "    def device_count(self):",
+        "        return self._runtime.device_count()",
+        "    def device_name(self, index):",
+        "        return self._runtime.device_name(index)",
+        "    def alloc(self, size):",
+        "        return self._runtime.alloc(size)",
+        "    def copy(self, host_values):",
+        "        return self._runtime.copy(host_values)",
+        "    def read(self, memory):",
+        "        return self._runtime.read(memory)",
+        "    def launch(self, kernel, grid_size, block_size, *args):",
+        "        return self._runtime.launch(kernel, grid_size, block_size, *args)",
+        "    def global_id(self):",
+        "        return self._runtime.global_id()",
+        "    def thread_id(self):",
+        "        return self._runtime.thread_id()",
+        "    def block_id(self):",
+        "        return self._runtime.block_id()",
+        "    def block_dim(self):",
+        "        return self._runtime.block_dim()",
+        "    def grid_dim(self):",
+        "        return self._runtime.grid_dim()",
+        "    def barrier(self):",
+        "        return self._runtime.barrier()",
+        "gpu = _AstraGpuNamespace(_astra_gpu_runtime)",
         "_astra_host_list_new = list_new",
         "_astra_host_list_push = list_push",
         "_astra_host_list_get = list_get",
@@ -454,6 +641,13 @@ def to_python(
         lines.append("    finally:")
         lines.append("        for _d in reversed(_astra_defer_stack):")
         lines.append("            _d()")
+        if bool(getattr(item, "gpu_kernel", False)):
+            param_types = [type_text(pty) for _, pty in item.params]
+            cuda_source, cuda_name = _emit_cuda_kernel_source(item, fn_name)
+            lines.append(
+                f"_astra_gpu_runtime.register_kernel({fn_name}, name={item.name!r}, symbol={fn_name!r}, "
+                f"params={param_types!r}, ret={type_text(item.ret)!r}, cuda_source={cuda_source!r}, cuda_name={cuda_name!r})"
+            )
     if emit_entrypoint and not freestanding:
         lines.append("if __name__ == '__main__':")
         lines.append(f"    _main_out = {main_entry}()")
@@ -745,6 +939,8 @@ def _target_expr(t: Any) -> str:
 
 
 def _match_cond_py(match_value_name: str, pat: Any) -> str:
+    if isinstance(pat, Name):
+        return "True"
     if isinstance(pat, WildcardPattern):
         return "True"
     if isinstance(pat, OrPattern):
@@ -753,9 +949,83 @@ def _match_cond_py(match_value_name: str, pat: Any) -> str:
             return "False"
         return f"({' or '.join(conds)})"
     if isinstance(pat, GuardedPattern):
-        base = _match_cond_py(match_value_name, pat.pattern)
-        return f"(({base}) and ({_expr(pat.guard)}))"
+        return _match_cond_py(match_value_name, pat.pattern)
+    if isinstance(pat, FieldExpr) and isinstance(pat.obj, Name):
+        enum_name = pat.obj.value
+        variant_name = pat.field
+        return (
+            f"(isinstance({match_value_name}, dict) and "
+            f"{match_value_name}.get('__enum__') == {enum_name!r} and "
+            f"{match_value_name}.get('tag') == {variant_name!r} and "
+            f"len({match_value_name}.get('values', [])) == 0)"
+        )
+    if isinstance(pat, Call) and isinstance(pat.fn, FieldExpr) and isinstance(pat.fn.obj, Name):
+        enum_name = pat.fn.obj.value
+        variant_name = pat.fn.field
+        vals = f"{match_value_name}.get('values', [])"
+        parts = [
+            f"isinstance({match_value_name}, dict)",
+            f"{match_value_name}.get('__enum__') == {enum_name!r}",
+            f"{match_value_name}.get('tag') == {variant_name!r}",
+            f"len({vals}) == {len(pat.args)}",
+        ]
+        for i, sub in enumerate(pat.args):
+            parts.append(_match_cond_py(f"{vals}[{i}]", sub))
+        return f"({' and '.join(parts)})"
+    if isinstance(pat, Call) and isinstance(pat.fn, Name) and pat.fn.value in _PY_STRUCTS:
+        struct_name = pat.fn.value
+        decl = _PY_STRUCTS[struct_name]
+        if len(pat.args) != len(decl.fields):
+            return "False"
+        parts = [f"isinstance({match_value_name}, {struct_name})"]
+        for (fname, _), sub in zip(decl.fields, pat.args):
+            parts.append(_match_cond_py(f"({match_value_name}).{fname}", sub))
+        return f"({' and '.join(parts)})"
     return f"{match_value_name} == {_expr(pat)}"
+
+
+def _split_match_pattern_py(pat: Any) -> tuple[list[Any], Any | None]:
+    if isinstance(pat, GuardedPattern):
+        return _flatten_or_pattern_py(pat.pattern), pat.guard
+    return _flatten_or_pattern_py(pat), None
+
+
+def _flatten_or_pattern_py(pat: Any) -> list[Any]:
+    if isinstance(pat, OrPattern):
+        out: list[Any] = []
+        for p in pat.patterns:
+            out.extend(_flatten_or_pattern_py(p))
+        return out
+    return [pat]
+
+
+def _match_bindings_py(match_value_name: str, pat: Any) -> list[tuple[str, str]]:
+    if isinstance(pat, Name):
+        if pat.value == "_":
+            return []
+        return [(pat.value, match_value_name)]
+    if isinstance(pat, WildcardPattern):
+        return []
+    if isinstance(pat, GuardedPattern):
+        return _match_bindings_py(match_value_name, pat.pattern)
+    if isinstance(pat, FieldExpr) and isinstance(pat.obj, Name):
+        return []
+    if isinstance(pat, Call) and isinstance(pat.fn, FieldExpr) and isinstance(pat.fn.obj, Name):
+        vals = f"{match_value_name}.get('values', [])"
+        out: list[tuple[str, str]] = []
+        for i, sub in enumerate(pat.args):
+            out.extend(_match_bindings_py(f"{vals}[{i}]", sub))
+        return out
+    if isinstance(pat, Call) and isinstance(pat.fn, Name) and pat.fn.value in _PY_STRUCTS:
+        struct_name = pat.fn.value
+        decl = _PY_STRUCTS[struct_name]
+        if len(pat.args) != len(decl.fields):
+            return []
+        out: list[tuple[str, str]] = []
+        for (fname, _), sub in zip(decl.fields, pat.args):
+            out.extend(_match_bindings_py(f"({match_value_name}).{fname}", sub))
+        return out
+    return []
 
 
 def _has_unconditional_wildcard(pat: Any) -> bool:
@@ -807,20 +1077,34 @@ def _stmt_py(st: Any, ind: int) -> list[str]:
         return lines
     if isinstance(st, MatchStmt):
         match_name = f"__match_value_{ind}"
-        lines = [f"{p}{match_name} = {_expr(st.expr)}"]
-        has_wildcard = False
-        for idx, (pat, body) in enumerate(st.arms):
-            has_wildcard = has_wildcard or _has_unconditional_wildcard(pat)
-            head = "if" if idx == 0 else "elif"
-            lines.append(f"{p}{head} {_match_cond_py(match_name, pat)}:")
-            if body:
-                for s in body:
-                    lines.extend(_stmt_py(s, ind + 1))
-            else:
+        matched_name = f"__match_done_{ind}"
+        lines = [f"{p}{match_name} = {_expr(st.expr)}", f"{p}{matched_name} = False"]
+        for _, (pat, body) in enumerate(st.arms):
+            alts, guard = _split_match_pattern_py(pat)
+            lines.append(f"{p}if not {matched_name}:")
+            for j, alt in enumerate(alts):
+                head = "if" if j == 0 else "elif"
+                lines.append(f"{'    ' * (ind + 1)}{head} {_match_cond_py(match_name, alt)}:")
+                bindings = _match_bindings_py(match_name, alt)
+                for bname, bexpr in bindings:
+                    lines.append(f"{'    ' * (ind + 2)}{bname} = {bexpr}")
+                if guard is not None:
+                    lines.append(f"{'    ' * (ind + 2)}if {_expr(guard)}:")
+                    lines.append(f"{'    ' * (ind + 3)}{matched_name} = True")
+                    if body:
+                        for s in body:
+                            lines.extend(_stmt_py(s, ind + 3))
+                    else:
+                        lines.append(f"{'    ' * (ind + 3)}pass")
+                else:
+                    lines.append(f"{'    ' * (ind + 2)}{matched_name} = True")
+                    if body:
+                        for s in body:
+                            lines.extend(_stmt_py(s, ind + 2))
+                    else:
+                        lines.append(f"{'    ' * (ind + 2)}pass")
+            if not alts:
                 lines.append(f"{'    ' * (ind + 1)}pass")
-        if st.arms and not has_wildcard:
-            lines.append(f"{p}else:")
-            lines.append(f"{'    ' * (ind + 1)}pass")
         return lines
     if isinstance(st, WhileStmt):
         lines = [f"{p}while {_expr(st.cond)}:"]

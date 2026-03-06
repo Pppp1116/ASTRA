@@ -9,6 +9,7 @@
 - Compile-time executor: `astra/comptime.py`
 - Lowering/optimization: `astra/for_lowering.py`, `astra/optimizer.py`
 - Backends: `astra/codegen.py`, `astra/llvm_codegen.py`
+- GPU subsystem: `astra/gpu/kernel_ir.py`, `astra/gpu/kernel_lowering.py`, `astra/gpu/backend_cuda.py`, `astra/gpu/backend_stub.py`, `astra/gpu/runtime.py`
 - Build/check orchestration: `astra/build.py`, `astra/check.py`
 
 ## Stage Flow
@@ -23,3 +24,4 @@ lex -> parse -> comptime -> semantic -> lowering -> optimization -> codegen
 - Semantic phase enforces type, safety, ownership/borrow, and builtin rules.
 - Lowering/optimization normalize AST and simplify code paths.
 - Backend emits executable representations with hosted/freestanding constraints.
+- GPU path adds kernel-specific semantic validation, kernel IR lowering, and runtime backend dispatch.

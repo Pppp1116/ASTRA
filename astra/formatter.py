@@ -333,6 +333,7 @@ def _fmt_item(item, cfg: FormatConfig) -> list[str]:
         pub = "pub " if item.pub else ""
         async_kw = "async " if item.async_fn else ""
         unsafe_kw = "unsafe " if item.unsafe else ""
+        gpu_kw = "gpu " if getattr(item, "gpu_kernel", False) else ""
         sig = ", ".join(f"{n} {type_text(t)}" for n, t in item.params)
         where_text = ""
         if item.where_bounds:
@@ -342,9 +343,9 @@ def _fmt_item(item, cfg: FormatConfig) -> list[str]:
             parts = [f"{tv}: {' + '.join(bounds)}" for tv, bounds in groups.items()]
             where_text = f" where {', '.join(parts)}"
         ret_text = f" {type_text(item.ret)}" if type_text(item.ret) != "Void" else ""
-        fn_head = f"{pub}{async_kw}{unsafe_kw}fn {item.name}({sig}){ret_text}{where_text}"
+        fn_head = f"{pub}{async_kw}{unsafe_kw}{gpu_kw}fn {item.name}({sig}){ret_text}{where_text}"
         if len(fn_head) > cfg.line_width and item.params:
-            out.append(f"{pub}{async_kw}{unsafe_kw}fn {item.name}(")
+            out.append(f"{pub}{async_kw}{unsafe_kw}{gpu_kw}fn {item.name}(")
             for n, t in item.params:
                 out.append(f"{_indent(1, cfg)}{n} {type_text(t)},")
             fn_head = f"){ret_text}{where_text}"

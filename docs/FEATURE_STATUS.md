@@ -14,22 +14,24 @@ Status labels:
 | Area | Status | Current State | Next Concrete Step | Acceptance Criteria |
 | --- | --- | --- | --- | --- |
 | Syntax and parsing | stable | Core syntax, async/await keywords, unsafe, generics, match are parsed. | Keep grammar docs synced with parser changes. | Parser + formatter + syntax docs updated in same PR. |
-| Semantic typing | partial | Strong baseline checks and integer strictness exist, including `trait` declarations, implicit trait satisfaction, and `where`-bounded call resolution for generic overloads. | Add fuller trait contract diagnostics and richer coherence checks. | New constrained-generic tests pass; invalid overlap rejected. |
-| Generics | partial | Parametric overload specialization exists with `where` trait bounds for overload resolution and return-type substitution from inferred type vars. | Expand to full coherence rules and richer trait-driven resolution. | Coherence and method resolution tests pass. |
-| Pattern matching | partial | Wildcard + Bool + enum-variant exhaustiveness checks are implemented with `|` alternatives and `if` guards (without deep ADT destructuring). | Implement ADT destructuring and deeper nested-pattern coverage checker. | Exhaustiveness/redundancy suite for enums and nested patterns passes. |
-| Ownership/borrow safety | partial | Move checks + borrow state + basic lifetime-like return rule implemented, including move-while-borrow rejection, referent move validation for reference reads, and scope-outlives checks that reject escaping inner-scope borrows. | Extend region/lifetime reasoning and diagnostics. | Borrow/lifetime regression suite covers escapes and aliasing edge cases. |
+| Semantic typing | partial | Generics with `where`-bounded resolution are implemented in semantic analysis/type checking. | Add fuller trait/coherence diagnostics and richer generic resolution failure reporting. | Constrained-generic and coherence diagnostics tests pass with actionable overlap/bound errors. |
+| Generics | partial | Parametric overload specialization exists with `where` trait bounds for overload resolution and return-type substitution from inferred type vars. | Expand to full coherence rules and richer trait-driven resolution diagnostics (candidate/bound mismatch detail). | Coherence, method resolution, and generic diagnostics tests pass. |
+| Pattern matching | partial | Wildcards, Bool, enum variants, guards, and destructuring are implemented. | Expand deeper exhaustiveness coverage and structural analysis for nested enum/struct/tuple patterns and arm redundancy. | Exhaustiveness/redundancy suite for deeper nested structural patterns passes. |
+| Ownership/borrow safety | partial | Move-by-default semantics are enforced, with copy behavior for numerics/`Bool`/`&T`, plus a basic lifetime-like return rule. | Expand region/lifetime reasoning and diagnostics with clearer origin/outlives notes. | Borrow/lifetime regression suite covers escapes, aliasing edges, and improved diagnostics. |
 | Error handling ergonomics | partial | Union-based error/nullable model exists (`A | B`, `T?`, `none`), with `!` propagation and `??` coalescing in semantic analysis plus Python and LLVM/native lowering. | Add richer union ergonomics (`map`, destructuring helpers) and diagnostics polish. | `!`/`??` behavior is parity-tested across Python and native backends. |
 | Compile-time evaluation | experimental | `comptime` infra exists and is tested for basic cases. | Expand deterministic CTFE boundaries + diagnostics. | CTFE failure diagnostics include stable spans and notes. |
+| GPU programming subsystem | partial | First-class `gpu fn` kernels, GPU memory types, host/device transfer APIs, kernel launch validation, kernel IR lowering, and runtime stub execution path are integrated. | Complete direct CUDA execution bridge and broaden kernel language surface (shared memory/atomics). | `tests/gpu/*` parser/semantic/launch/integration suites pass; docs/gpu matrix matches implementation. |
 
 ## Runtime and Backends
 
 | Area | Status | Current State | Next Concrete Step | Acceptance Criteria |
 | --- | --- | --- | --- | --- |
 | Python backend | partial | Broad hosted feature support; fast dev loop backend. | Keep behavior aligned with documented semantics. | Golden semantic behavior stays consistent across releases. |
-| LLVM IR backend | partial | Extensive IR lowering and validation pipeline, with explicit py/native parity coverage for hosted stdlib wrappers (`std.net`, `std.thread`, `std.crypto`, `std.serde`, `std.process`). | Continue parity hardening for hosted runtime APIs. | Backend parity tests cover builtins used by stdlib wrappers. |
-| Native runtime helpers | partial | Runtime includes memory, file/process/time helpers and TCP on POSIX. | Implement platform shims for non-POSIX networking. | Native network tests pass on Linux/macOS and have explicit Windows status. |
-| Async/concurrency runtime | partial | Native `spawn/join` uses real OS threads for Int worker signatures; `await_result` remains lightweight without a full async scheduler contract. | Finalize scheduler/runtime contract for async beyond thread spawn/join. | Async/threading docs and stress tests cover the finalized model. |
-| Cross-platform target matrix | partial | LLVM target triple support exists, runtime is mostly POSIX-oriented. | Define tier targets + CI matrix. | CI executes core suite on declared tier-1 targets. |
+| LLVM IR backend | partial | Extensive IR lowering and validation pipeline, with ongoing py/native parity hardening for hosted runtime APIs (`std.net`, `std.thread`, `std.crypto`, `std.serde`, `std.process`). | Continue parity hardening for hosted runtime APIs and close remaining backend behavior gaps. | Backend parity tests cover builtins used by hosted stdlib wrappers with documented known gaps. |
+| Native runtime helpers | partial | Runtime includes memory/file/process/time helpers and TCP shims for POSIX and Windows paths, but Windows parity is not complete. | Harden Windows-native parity for runtime helpers and networking with dedicated CI/runtime coverage. | Native helper/network tests pass on Linux/macOS, with explicit Windows parity closure criteria tracked in CI. |
+| Async/concurrency runtime | partial | Async support is currently thread-based (`spawn`/`join`) and does not define a full scheduler contract. | Extend async coverage beyond thread spawn/join while preserving a lightweight (no full scheduler) contract. | Async/threading docs and stress tests cover the expanded no-scheduler model. |
+| GPU runtime/backends | partial | GPU runtime API is available in Python backend, with CUDA capability probing, runtime JIT launch bridge for supported kernels, and deterministic CPU stub fallback. | Expand CUDA kernel-shape coverage and add backend parity testing lanes. | CUDA-enabled environments execute supported kernels through native backend; unsupported forms fall back deterministically. |
+| Cross-platform target matrix | partial | LLVM target triple support exists and CI runs on Ubuntu/macOS/Windows for core workflows. | Expand tier target policy into native-runtime parity lanes per OS. | CI executes core suite on declared tier-1 targets. |
 
 ## Tooling and Ecosystem
 
@@ -45,18 +47,18 @@ Status labels:
 
 | Area | Status | Current State | Next Concrete Step | Acceptance Criteria |
 | --- | --- | --- | --- | --- |
-| `std.core` / checked numerics | stable | `Option`/`Result` and checked int helpers exist. | Add ergonomic sugar support (`?`) from language side. | Core error-handling examples compile and pass. |
-| Collections | experimental | Dynamic list/map wrappers over runtime `Any`. | Add typed containers + iterator abstractions. | Typed container API has unit + semantic tests. |
+| `std.core` / checked numerics | stable | Union/nullable model (`A | B`, `T?`, `none`) and checked int helpers are in place. | Continue ergonomic helpers on top of union-based errors/nullability. | Core error-handling examples compile and pass. |
+| Collections | experimental | Dynamic list/map wrappers over runtime `Any`. | Add typed containers + iterator abstractions with generic constraints. | Typed container API has unit, semantic, and inference/diagnostic tests. |
 | Concurrency helpers | partial | `std.thread` spawn/join and `std.atomic` are runtime-backed (OS threads + seq-cst atomics); `std.sync`/`std.channel` are still cooperative wrappers. | Replace cooperative sync/channel wrappers with runtime-backed primitives. | Thread/atomic behavior and sync/channel semantics are parity-tested with stress coverage. |
-| Networking | experimental | TCP helper wrappers implemented for hosted backends with cross-backend parity coverage for connect/send/recv/close success + failure paths. | Add richer socket/error model and non-blocking options. | TCP tests include connect/send/recv/close success + failures. |
-| Serde | experimental | JSON serialize/deserialize wrappers for dynamic values. | Add typed decode and derive hooks. | Typed serde roundtrip tests and diagnostics pass. |
-| Crypto | experimental | SHA-256 and HMAC-SHA256 wrappers. | Add RNG/KDF/AEAD APIs with safer typed contracts. | Crypto API tests include misuse-resistant paths. |
+| Networking | experimental | TCP helper wrappers implemented for hosted backends with parity coverage for connect/send/recv/close success + failure paths (Windows CI parity still limited). | Add richer socket/error model, non-blocking options, and Windows parity hardening. | TCP tests include connect/send/recv/close success + failures across POSIX + Windows lanes. |
+| Serde | experimental | JSON serialize/deserialize wrappers for dynamic values. | Add typed decode and derive hooks with richer type-mismatch diagnostics. | Typed serde roundtrip tests and derive diagnostics pass. |
+| Crypto | experimental | SHA-256 and HMAC-SHA256 wrappers. | Add RNG/KDF/AEAD APIs with safer typed contracts and nonce/key misuse diagnostics. | Crypto API tests include misuse-resistant RNG/KDF/AEAD paths. |
 | Math | stable | Pure integer helper functions. | Expand float/trig utilities as separate stable module. | Math docs + tests for new APIs pass in hosted/freestanding modes. |
 
 ## Execution Order
 
 1. Backend/runtime parity and status documentation truth.
-2. Trait-constrained generics and pattern-match exhaustiveness.
-3. Error ergonomics (`?`) and package resolver lock integrity.
-4. Concurrency/async model finalization and stdlib deepening.
-5. Cross-platform CI tiers and self-hosting milestone.
+2. Trait coherence, richer generic-resolution diagnostics, and deep pattern exhaustiveness.
+3. Lifetime/region reasoning + diagnostics and error ergonomics (`?`).
+4. Async beyond thread spawn/join (without a full scheduler contract) and stdlib deepening.
+5. Windows-native runtime/networking parity, cross-platform CI tiers, and self-hosting milestone.

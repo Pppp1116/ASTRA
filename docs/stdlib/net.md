@@ -15,7 +15,7 @@ Hosted TCP helpers:
 Backend support:
 
 - Python backend: supported
-- Native backend (LLVM + runtime): supported on POSIX
+- Native backend (LLVM + runtime): supported on POSIX, with Windows runtime path available but CI parity still limited
 - Freestanding mode: not supported
 
 Notes:
@@ -26,3 +26,8 @@ Notes:
   - `tcp_recv`: returns an empty string on invalid handle or receive failure
   - `tcp_close`: invalid handles are treated as already closed (`0`)
 - API is synchronous and connection-handle based
+
+Near-term direction:
+
+- Harden Windows-native parity coverage for connect/send/recv/close behavior
+- Expand typed socket/error modeling and non-blocking options

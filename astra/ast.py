@@ -59,6 +59,7 @@ class FnDecl:
     symbol: str = ""
     doc: str = ""
     where_bounds: list[tuple[str, str]] = field(default_factory=list)
+    gpu_kernel: bool = False
     pos: int = 0
     line: int = 0
     col: int = 0

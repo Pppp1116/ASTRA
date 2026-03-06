@@ -2662,6 +2662,8 @@ def _compile_match_condition(
     overflow_mode: str,
 ) -> ir.Value:
     b = state.builder
+    if isinstance(pat, Name):
+        return ir.Constant(ir.IntType(1), 1)
     if isinstance(pat, WildcardPattern):
         return ir.Constant(ir.IntType(1), 1)
     if isinstance(pat, GuardedPattern):
@@ -2688,11 +2690,99 @@ def _compile_match_condition(
         for alt in pat.patterns:
             out = b.or_(out, _compile_match_condition(ctx, state, subj, alt, overflow_mode))
         return out
+    if isinstance(pat, Call) and isinstance(pat.fn, Name):
+        struct_name = pat.fn.value
+        subj_ty = _strip_ref_type(_canonical_type(subj.ty))
+        if struct_name in ctx.structs and subj_ty == struct_name:
+            sinfo = ctx.structs[struct_name]
+            if len(pat.args) != len(sinfo.decl.fields):
+                return ir.Constant(ir.IntType(1), 0)
+            ptr = _struct_ptr(ctx, state, subj.value, subj.ty, sinfo, pat)
+            cond = ir.Constant(ir.IntType(1), 1)
+            for i, (sub, fty) in enumerate(zip(pat.args, sinfo.field_types)):
+                if sinfo.packed:
+                    raw, bits, _ = _packed_load_bits(ctx, state, ptr, sinfo, sinfo.decl.fields[i][0], pat)
+                    ll = _llvm_type(ctx, fty)
+                    if isinstance(ll, ir.IntType) and bits != ll.width:
+                        if ll.width > bits:
+                            info = _int_info(fty)
+                            if info is not None and info[1]:
+                                fv = state.builder.sext(raw, ll)
+                            else:
+                                fv = state.builder.zext(raw, ll)
+                        else:
+                            fv = state.builder.trunc(raw, ll)
+                    else:
+                        fv = raw
+                else:
+                    fld = state.builder.gep(ptr, [ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), i)])
+                    fv = state.builder.load(fld)
+                sub_cond = _compile_match_condition(ctx, state, _Value(fv, fty), sub, overflow_mode)
+                cond = b.and_(cond, sub_cond)
+            return cond
     pv = _compile_expr(ctx, state, pat, overflow_mode=overflow_mode)
     pvv = _coerce_value(ctx, state, pv.value, pv.ty, subj.ty, pat)
     if isinstance(subj.value.type, (ir.FloatType, ir.DoubleType)):
         return b.fcmp_ordered("==", subj.value, pvv)
     return b.icmp_unsigned("==", subj.value, pvv)
+
+
+def _compile_match_bindings(
+    ctx: _ModuleCtx,
+    state: _FnState,
+    subj: _Value,
+    pat: Any,
+) -> None:
+    b = state.builder
+    if isinstance(pat, Name):
+        if pat.value == "_":
+            return
+        name = pat.value
+        ty = _canonical_type(subj.ty)
+        ptr = state.vars.get(name)
+        if ptr is None:
+            ptr = b.alloca(_llvm_type(ctx, ty), name=name)
+            state.vars[name] = ptr
+            state.var_types[name] = ty
+        v = _coerce_value(ctx, state, subj.value, subj.ty, ty, pat)
+        b.store(v, ptr)
+        return
+    if isinstance(pat, WildcardPattern):
+        return
+    if isinstance(pat, GuardedPattern):
+        _compile_match_bindings(ctx, state, subj, pat.pattern)
+        return
+    if isinstance(pat, OrPattern):
+        # Binding extraction for `|` alternatives is not lowered here because
+        # the matched alternative is not tracked in this stage.
+        return
+    if isinstance(pat, Call) and isinstance(pat.fn, Name):
+        struct_name = pat.fn.value
+        subj_ty = _strip_ref_type(_canonical_type(subj.ty))
+        if struct_name in ctx.structs and subj_ty == struct_name:
+            sinfo = ctx.structs[struct_name]
+            if len(pat.args) != len(sinfo.decl.fields):
+                return
+            ptr = _struct_ptr(ctx, state, subj.value, subj.ty, sinfo, pat)
+            for i, (sub, fty) in enumerate(zip(pat.args, sinfo.field_types)):
+                if sinfo.packed:
+                    raw, bits, _ = _packed_load_bits(ctx, state, ptr, sinfo, sinfo.decl.fields[i][0], pat)
+                    ll = _llvm_type(ctx, fty)
+                    if isinstance(ll, ir.IntType) and bits != ll.width:
+                        if ll.width > bits:
+                            info = _int_info(fty)
+                            if info is not None and info[1]:
+                                fv = b.sext(raw, ll)
+                            else:
+                                fv = b.zext(raw, ll)
+                        else:
+                            fv = b.trunc(raw, ll)
+                    else:
+                        fv = raw
+                else:
+                    fld = b.gep(ptr, [ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), i)])
+                    fv = b.load(fld)
+                _compile_match_bindings(ctx, state, _Value(fv, fty), sub)
 
 
 def _compile_stmt(ctx: _ModuleCtx, state: _FnState, st: Any, overflow_mode: str) -> None:
@@ -3100,6 +3190,7 @@ def _compile_stmt(ctx: _ModuleCtx, state: _FnState, st: Any, overflow_mode: str)
             state.builder.cbranch(cmpv, arm_block, next_block)
 
             state.builder.position_at_end(arm_block)
+            _compile_match_bindings(ctx, state, subj, pat)
             for sub in body:
                 _compile_stmt(ctx, state, sub, overflow_mode)
                 if _is_terminated(state):

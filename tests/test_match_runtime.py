@@ -45,3 +45,31 @@ fn main() Int{
         backends=("py", "native"),
     )
     assert_same_stdout_and_exit(results, expected_stdout="", expected_returncode=5)
+
+
+def test_match_struct_destructuring_runtime_parity(tmp_path) -> None:
+    src = """
+struct Pair {
+  a Int,
+  b Int,
+}
+
+fn main() Int{
+  p = Pair(9, 4);
+  match p {
+    Pair(x, y) => {
+      print(x);
+      print(y);
+      return x + y;
+    }
+  }
+  return 0;
+}
+"""
+    results = compile_and_run_program(
+        tmp_path,
+        name="match_struct_destructuring_runtime",
+        src_text=src,
+        backends=("py", "native"),
+    )
+    assert_same_stdout_and_exit(results, expected_stdout="9\n4\n", expected_returncode=13)

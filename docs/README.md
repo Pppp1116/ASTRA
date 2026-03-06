@@ -4,6 +4,7 @@
 - Standard library reference: `docs/stdlib/`
 - Tooling and CLI: `docs/tooling/`
 - Compiler internals: `docs/compiler/`
+- GPU subsystem: `docs/gpu/`
 - Development guide: `docs/development/`
 
 Existing project docs retained in this repository:

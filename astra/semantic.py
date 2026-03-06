@@ -148,6 +148,44 @@ def _slice_inner(typ: Any) -> str:
     return t[1:-1]
 
 
+def _gpu_type_arg(typ: Any, base: str) -> str | None:
+    parsed = _parse_parametric_type(typ)
+    if parsed is None:
+        return None
+    head, args = parsed
+    if head != base or len(args) != 1:
+        return None
+    return args[0]
+
+
+def _is_gpu_buffer_type(typ: Any) -> bool:
+    return _gpu_type_arg(typ, "GpuBuffer") is not None
+
+
+def _is_gpu_slice_type(typ: Any) -> bool:
+    return _gpu_type_arg(typ, "GpuSlice") is not None
+
+
+def _is_gpu_mut_slice_type(typ: Any) -> bool:
+    return _gpu_type_arg(typ, "GpuMutSlice") is not None
+
+
+def _is_gpu_view_type(typ: Any) -> bool:
+    return _is_gpu_slice_type(typ) or _is_gpu_mut_slice_type(typ)
+
+
+def _is_gpu_memory_type(typ: Any) -> bool:
+    return _is_gpu_buffer_type(typ) or _is_gpu_view_type(typ)
+
+
+def _gpu_element_type(typ: Any) -> str | None:
+    for base in ("GpuBuffer", "GpuSlice", "GpuMutSlice"):
+        inner = _gpu_type_arg(typ, base)
+        if inner is not None:
+            return inner
+    return None
+
+
 def _strip_ref(typ: Any) -> str:
     t = _canonical_type(typ)
     if t.startswith("&mut "):
@@ -245,7 +283,74 @@ def _is_copy_type(typ: str) -> bool:
         return True
     if c in COPY_SCALAR_TYPES:
         return True
+    if _is_gpu_memory_type(c):
+        return True
     return _is_ref_type(c) and not _is_mut_ref_type(c)
+
+
+def _is_gpu_scalar_type(typ: str) -> bool:
+    c = _canonical_type(typ)
+    return c in {"Bool", "Int", "isize", "usize", "Float", "f32", "f64"} or _is_int_type(c)
+
+
+def _is_gpu_safe_type(typ: str, structs: dict[str, StructDecl], *, seen: set[str] | None = None) -> bool:
+    c = _canonical_type(typ)
+    if c in {"Void", "Never"}:
+        return True
+    if _is_gpu_scalar_type(c):
+        return True
+    if _is_gpu_memory_type(c):
+        inner = _gpu_element_type(c)
+        return inner is not None and _is_gpu_safe_type(inner, structs, seen=seen)
+    if c in {"String", "str", "Any"}:
+        return False
+    if _is_option_type(c) or _is_result_type(c) or _is_vec_type(c) or _is_slice_type(c):
+        return False
+    if c.startswith("fn(") or c.startswith("unsafe fn("):
+        return False
+    if c.startswith("&"):
+        return False
+    if c in structs:
+        guard = seen or set()
+        if c in guard:
+            return True
+        guard.add(c)
+        for _, fty in structs[c].fields:
+            if not _is_gpu_safe_type(fty, structs, seen=guard):
+                return False
+        guard.remove(c)
+        return True
+    return False
+
+
+def _is_gpu_kernel_param_type(typ: str, structs: dict[str, StructDecl]) -> bool:
+    c = _canonical_type(typ)
+    if _is_gpu_view_type(c):
+        inner = _gpu_element_type(c)
+        return inner is not None and _is_gpu_safe_type(inner, structs)
+    if _is_gpu_scalar_type(c):
+        return True
+    if c in structs:
+        return _is_gpu_safe_type(c, structs)
+    return False
+
+
+def _gpu_launch_arg_compatible(expected: str, actual: str) -> bool:
+    exp = _canonical_type(expected)
+    act = _canonical_type(actual)
+    if _same_type(exp, act):
+        return True
+    exp_el = _gpu_element_type(exp)
+    act_el = _gpu_element_type(act)
+    if exp_el is None or act_el is None:
+        return False
+    if _is_gpu_slice_type(exp) and (_is_gpu_buffer_type(act) or _is_gpu_slice_type(act) or _is_gpu_mut_slice_type(act)):
+        return _same_type(exp_el, act_el)
+    if _is_gpu_mut_slice_type(exp) and (_is_gpu_buffer_type(act) or _is_gpu_mut_slice_type(act)):
+        return _same_type(exp_el, act_el)
+    if _is_gpu_buffer_type(exp) and _is_gpu_buffer_type(act):
+        return _same_type(exp_el, act_el)
+    return False
 
 
 def _validate_decl_type(typ: Any, filename: str, line: int, col: int) -> None:
@@ -401,6 +506,34 @@ _FREESTANDING_FORBIDDEN_BUILTINS: set[str] = {
     "proc_exit",
 }
 _FREESTANDING_MODE_STACK: list[bool] = []
+
+GPU_KERNEL_BUILTINS: set[str] = {
+    "global_id",
+    "thread_id",
+    "block_id",
+    "block_dim",
+    "grid_dim",
+    "barrier",
+}
+GPU_HOST_APIS: set[str] = {
+    "available",
+    "device_count",
+    "device_name",
+    "alloc",
+    "copy",
+    "read",
+    "launch",
+}
+GPU_ALLOWED_IN_KERNEL_BUILTINS: set[str] = {
+    "countOnes",
+    "leadingZeros",
+    "trailingZeros",
+    "popcnt",
+    "clz",
+    "ctz",
+    "rotl",
+    "rotr",
+}
 
 
 def _builtin_base_name(name: str) -> str:
@@ -580,7 +713,13 @@ class _BorrowState:
             if not owner_mutable:
                 raise SemanticError(_diag(filename, line, col, f"cannot mutably borrow immutable binding {owner}"))
             if has_mut or has_shared:
-                raise SemanticError(_diag(filename, line, col, f"cannot mutably borrow {owner} while it is already borrowed"))
+                details: list[str] = []
+                if has_mut:
+                    details.append("an active mutable borrow exists")
+                if has_shared:
+                    details.append(f"{self.shared_counts.get(owner, 0)} active shared borrow(s)")
+                suffix = f" ({'; '.join(details)})" if details else ""
+                raise SemanticError(_diag(filename, line, col, f"cannot mutably borrow {owner} while it is already borrowed{suffix}"))
             return
         if has_mut:
             raise SemanticError(_diag(filename, line, col, f"cannot immutably borrow {owner} while it is mutably borrowed"))
@@ -684,6 +823,8 @@ def _same_type(expected: str, actual: str) -> bool:
         exp_base, exp_args = exp_param
         act_base, act_args = act_param
         if exp_base == act_base and len(exp_args) == len(act_args):
+            if exp_base in {"GpuBuffer", "GpuSlice", "GpuMutSlice"}:
+                return all(_same_type(ea, aa) or _canonical_type(aa) == "Any" for ea, aa in zip(exp_args, act_args))
             return all(_same_type(ea, aa) for ea, aa in zip(exp_args, act_args))
     if {expected, actual} == {"String", "str"}:
         return True
@@ -756,6 +897,7 @@ def _is_any_dynamic_cast_target(typ: str) -> bool:
     return (
         c in {"Bool", "String", "str"}
         or _is_numeric_scalar_type(c)
+        or _is_gpu_memory_type(c)
         or _is_ref_type(c)
         or _is_option_type(c)
         or _is_vec_type(c)
@@ -855,16 +997,27 @@ def _consume_if_move_name(
         move.consume(expr.value, filename, line, col)
 
 
-def _ref_return_tied_to_param(expr: Any, ref_param_names: set[str], borrow: _BorrowState) -> bool:
+def _ref_return_tie_info(expr: Any, ref_param_names: set[str], borrow: _BorrowState) -> tuple[bool, str | None]:
     if isinstance(expr, Name):
         if expr.value in ref_param_names:
-            return True
+            return True, None
         origin = borrow.ref_origins.get(expr.value)
         if origin in ref_param_names:
-            return True
+            return True, None
         info = borrow.ref_bindings.get(expr.value)
-        return info is not None and info.owner in ref_param_names
-    return False
+        if info is not None and info.owner in ref_param_names:
+            return True, None
+        if info is not None:
+            return False, f"returned `{expr.value}` currently borrows `{info.owner}`"
+        if origin is not None:
+            return False, f"returned `{expr.value}` originates from `{origin}`"
+        return False, f"returned `{expr.value}` does not originate from an input reference parameter"
+    return False, "only returning a named reference tied to an input reference parameter is currently supported"
+
+
+def _ref_return_tied_to_param(expr: Any, ref_param_names: set[str], borrow: _BorrowState) -> bool:
+    ok, _ = _ref_return_tie_info(expr, ref_param_names, borrow)
+    return ok
 
 
 def _lookup(name: str, scopes: list[dict[str, str]]) -> str | None:
@@ -894,7 +1047,17 @@ def _ensure_ref_owner_outlives_binding(
     if owner_i is None or ref_i is None:
         return
     if owner_i > ref_i:
-        raise SemanticError(_diag(filename, line, col, f"reference {ref_name} cannot outlive borrowed value {owner}"))
+        raise SemanticError(
+            _diag(
+                filename,
+                line,
+                col,
+                (
+                    f"reference {ref_name} cannot outlive borrowed value {owner} "
+                    f"(owner scope depth {owner_i}, reference scope depth {ref_i})"
+                ),
+            )
+        )
 
 
 def _assign(name: str, typ: str, scopes: list[dict[str, str]], filename: str, line: int, col: int):
@@ -1017,6 +1180,9 @@ def _is_send_type(
         return _is_sync_type(c[1:], structs, seen=seen)
     if c.startswith("fn(") or c.startswith("unsafe fn("):
         return True
+    if _is_gpu_memory_type(c):
+        inner = _gpu_element_type(c)
+        return inner is not None and _is_send_type(inner, structs, seen=seen)
     if _is_option_type(c):
         return _is_send_type(_option_inner(c), structs, seen=seen)
     if _is_vec_type(c):
@@ -1055,6 +1221,9 @@ def _is_sync_type(
         return _is_sync_type(c[1:], structs, seen=seen)
     if c.startswith("fn(") or c.startswith("unsafe fn("):
         return True
+    if _is_gpu_memory_type(c):
+        inner = _gpu_element_type(c)
+        return inner is not None and _is_sync_type(inner, structs, seen=seen)
     if _is_option_type(c):
         return _is_sync_type(_option_inner(c), structs, seen=seen)
     if _is_vec_type(c):
@@ -1302,11 +1471,11 @@ def _decl_more_specific(a: FnDecl | ExternFnDecl, b: FnDecl | ExternFnDecl, know
     return strictly_more
 
 
-def _decls_overlap(a: FnDecl | ExternFnDecl, b: FnDecl | ExternFnDecl, known_types: set[str]) -> bool:
+def _decl_overlap_probe(a: FnDecl | ExternFnDecl, b: FnDecl | ExternFnDecl, known_types: set[str]) -> list[str] | None:
     if bool(getattr(a, "is_variadic", False)) or bool(getattr(b, "is_variadic", False)):
-        return False
+        return None
     if len(a.params) != len(b.params):
-        return False
+        return None
     probes: list[str] = []
     a_typevars = set(getattr(a, "generics", []))
     b_typevars = set(getattr(b, "generics", []))
@@ -1344,8 +1513,16 @@ def _decls_overlap(a: FnDecl | ExternFnDecl, b: FnDecl | ExternFnDecl, known_typ
         if i == 0 and _is_ref_type(bp_c) and _same_type(_strip_ref(bp_c), ap_c):
             probes.append(ap_c)
             continue
-        return False
-    return _match_decl_bindings(a, probes, known_types) is not None and _match_decl_bindings(b, probes, known_types) is not None
+        return None
+    if _match_decl_bindings(a, probes, known_types) is None:
+        return None
+    if _match_decl_bindings(b, probes, known_types) is None:
+        return None
+    return probes
+
+
+def _decls_overlap(a: FnDecl | ExternFnDecl, b: FnDecl | ExternFnDecl, known_types: set[str]) -> bool:
+    return _decl_overlap_probe(a, b, known_types) is not None
 
 
 def _choose_impl(
@@ -1363,7 +1540,7 @@ def _choose_impl(
         if sc is not None:
             ranked.append((sc, d))
     if not ranked:
-        where_misses: list[str] = []
+        where_misses: list[tuple[str, str]] = []
         for d in decls:
             matched = _match_decl_bindings(d, arg_types, known_types)
             if matched is None:
@@ -1377,15 +1554,32 @@ def _choose_impl(
                 if not missing:
                     continue
                 where_misses.append(
-                    f"{tvar}: {trait_name} not satisfied for {concrete}; missing {', '.join(missing)}"
+                    (
+                        _decl_signature_text(d),
+                        f"{tvar}: {trait_name} not satisfied for {concrete}; missing {', '.join(missing)}",
+                    )
                 )
         if where_misses:
+            sig, reason = where_misses[0]
             raise SemanticError(
                 _diag(
                     filename,
                     line,
                     col,
-                    f"trait bound check failed for {name}({', '.join(arg_types)}): {where_misses[0]}",
+                    (
+                        f"trait bound check failed for {name}({', '.join(arg_types)}): {reason}; "
+                        f"candidate `{sig}`"
+                    ),
+                )
+            )
+        available = ", ".join(f"`{_decl_signature_text(d)}`" for d in decls)
+        if available:
+            raise SemanticError(
+                _diag(
+                    filename,
+                    line,
+                    col,
+                    f"no matching overload for {name}({', '.join(arg_types)}); available: {available}",
                 )
             )
         raise SemanticError(_diag(filename, line, col, f"no matching overload for {name}({', '.join(arg_types)})"))
@@ -1393,7 +1587,15 @@ def _choose_impl(
     best_score = ranked[0][0]
     best = [d for s, d in ranked if s == best_score]
     if len(best) > 1:
-        raise SemanticError(_diag(filename, line, col, f"ambiguous overload for {name}({', '.join(arg_types)})"))
+        candidates = ", ".join(f"`{_decl_signature_text(d)}`" for d in best)
+        raise SemanticError(
+            _diag(
+                filename,
+                line,
+                col,
+                f"ambiguous overload for {name}({', '.join(arg_types)}): candidates {candidates}",
+            )
+        )
     return best[0]
 
 
@@ -1594,6 +1796,50 @@ def analyze(
             for fn in decls:
                 if not isinstance(fn, FnDecl):
                     continue
+                if getattr(fn, "gpu_kernel", False):
+                    fn_filename = getattr(fn, "_source_filename", filename)
+                    if fn.async_fn:
+                        _record(
+                            SemanticError(
+                                _diag(fn_filename, fn.line, fn.col, "gpu kernels cannot be async")
+                            )
+                        )
+                    if fn.unsafe:
+                        _record(
+                            SemanticError(
+                                _diag(fn_filename, fn.line, fn.col, "gpu kernels cannot be unsafe")
+                            )
+                        )
+                    if fn.generics:
+                        _record(
+                            SemanticError(
+                                _diag(fn_filename, fn.line, fn.col, "gpu kernels do not support generic parameters yet")
+                            )
+                        )
+                    if fn.where_bounds:
+                        _record(
+                            SemanticError(
+                                _diag(fn_filename, fn.line, fn.col, "gpu kernels do not support where clauses")
+                            )
+                        )
+                    if _canonical_type(fn.ret) != "Void":
+                        _record(
+                            SemanticError(
+                                _diag(fn_filename, fn.line, fn.col, "gpu kernels must return Void")
+                            )
+                        )
+                    for pname, pty in fn.params:
+                        if not _is_gpu_kernel_param_type(pty, structs):
+                            _record(
+                                SemanticError(
+                                    _diag(
+                                        fn_filename,
+                                        fn.line,
+                                        fn.col,
+                                        f"gpu kernel parameter {pname} uses unsupported type {pty}",
+                                    )
+                                )
+                            )
                 known_types = set(PRIMITIVES) | set(structs.keys()) | set(enums.keys())
                 type_vars = set(fn.generics)
                 for _, pty in fn.params:
@@ -1630,17 +1876,22 @@ def analyze(
             fn_decls = [d for d in decls if isinstance(d, FnDecl) and not bool(getattr(d, "is_variadic", False))]
             for i, a in enumerate(fn_decls):
                 for b in fn_decls[i + 1 :]:
-                    if not _decls_overlap(a, b, known_types):
+                    probe = _decl_overlap_probe(a, b, known_types)
+                    if probe is None:
                         continue
                     if _decl_more_specific(a, b, known_types) or _decl_more_specific(b, a, known_types):
                         continue
+                    probe_text = ", ".join(probe)
                     _record(
                         SemanticError(
                             _diag(
                                 getattr(a, "_source_filename", filename),
                                 a.line,
                                 a.col,
-                                f"overlapping overloads for {name} are ambiguous: `{_decl_signature_text(a)}` vs `{_decl_signature_text(b)}`",
+                                (
+                                    f"overlapping overloads for {name} are ambiguous for ({probe_text}): "
+                                    f"`{_decl_signature_text(a)}` vs `{_decl_signature_text(b)}`"
+                                ),
                             )
                         )
                     )
@@ -1750,6 +2001,7 @@ def _analyze_fn(
         fn.name,
         0,
         fn.unsafe,
+        bool(getattr(fn, "gpu_kernel", False)),
     )
     if _canonical_type(fn.ret) not in {"Void", "Never"} and not _has_value_return(fn.body):
         raise SemanticError(_diag(filename, fn.line, fn.col, f"function {fn.name} must return {fn.ret}"))
@@ -1799,6 +2051,7 @@ def _check_block(
     fn_name: str,
     loop_depth: int,
     unsafe_ok: bool,
+    gpu_kernel: bool,
 ):
     for st in body:
         _check_stmt(
@@ -1819,6 +2072,7 @@ def _check_block(
             fn_name,
             loop_depth,
             unsafe_ok,
+            gpu_kernel,
         )
     borrow.release_scope(borrow_scopes[-1])
     move.release_scope(move_scopes[-1])
@@ -1907,26 +2161,252 @@ def _covered_enum_variants_by_pattern(pat: Any, enum_decl: EnumDecl, enums: dict
     return {variant_name}
 
 
+def _finite_axes_for_type(
+    typ: str,
+    structs: dict[str, StructDecl],
+    enums: dict[str, EnumDecl],
+    *,
+    seen_structs: set[str] | None = None,
+) -> list[tuple[set[str], set[str]]]:
+    exp_c = _canonical_type(typ)
+    if exp_c == "Bool":
+        universe = {"false", "true"}
+        return [(set(universe), set(universe))]
+    enum_decl = _enum_decl_for_type(exp_c, enums)
+    if enum_decl is not None:
+        universe = {name for name, _ in enum_decl.variants}
+        return [(set(universe), set(universe))]
+    if exp_c in structs:
+        guard = seen_structs or set()
+        if exp_c in guard:
+            return []
+        guard.add(exp_c)
+        axes: list[tuple[set[str], set[str]]] = []
+        for _, fty in structs[exp_c].fields:
+            axes.extend(_finite_axes_for_type(fty, structs, enums, seen_structs=guard))
+        guard.remove(exp_c)
+        return axes
+    return []
+
+
+def _coverage_axes_for_pattern(
+    pat: Any,
+    expected_ty: str,
+    structs: dict[str, StructDecl],
+    enums: dict[str, EnumDecl],
+) -> list[tuple[set[str], set[str]]] | None:
+    if isinstance(pat, (WildcardPattern, Name)):
+        return _finite_axes_for_type(expected_ty, structs, enums)
+
+    exp_c = _canonical_type(expected_ty)
+    if exp_c == "Bool":
+        if isinstance(pat, BoolLit):
+            value = "true" if pat.value else "false"
+            return [({value}, {"false", "true"})]
+        return None
+
+    enum_decl = _enum_decl_for_type(exp_c, enums)
+    if enum_decl is not None:
+        variant_name = _enum_variant_name_for_pattern(pat, enum_decl.name)
+        if variant_name is None:
+            return None
+        payload_types = next((vtypes for vname, vtypes in enum_decl.variants if vname == variant_name), None)
+        if payload_types is None:
+            return None
+        payload_pats = _enum_variant_payload_patterns_for_pattern(pat, enum_decl.name)
+        if payload_pats is None or len(payload_pats) != len(payload_types):
+            return None
+        universe = {name for name, _ in enum_decl.variants}
+        axes: list[tuple[set[str], set[str]]] = [({variant_name}, universe)]
+        for pnode, pty in zip(payload_pats, payload_types):
+            inner_axes = _coverage_axes_for_pattern(pnode, pty, structs, enums)
+            if inner_axes is None:
+                return None
+            axes.extend(inner_axes)
+        return axes
+
+    if exp_c in structs and isinstance(pat, Call) and isinstance(pat.fn, Name) and pat.fn.value == exp_c:
+        decl = structs[exp_c]
+        if len(pat.args) != len(decl.fields):
+            return None
+        axes: list[tuple[set[str], set[str]]] = []
+        for pnode, (_, fty) in zip(pat.args, decl.fields):
+            inner_axes = _coverage_axes_for_pattern(pnode, fty, structs, enums)
+            if inner_axes is None:
+                return None
+            axes.extend(inner_axes)
+        return axes
+
+    # Non-finite domains (e.g., Int/String) are only analyzable when total, which
+    # is handled by wildcard/name above.
+    return None
+
+
 def _variant_payload_coverage_keys(
     payload_pats: list[Any],
     payload_types: list[str],
+    structs: dict[str, StructDecl],
     enums: dict[str, EnumDecl],
 ) -> tuple[set[tuple[str, ...]] | None, set[tuple[str, ...]] | None]:
-    enum_axes: list[tuple[set[str], set[str]]] = []
+    axes: list[tuple[set[str], set[str]]] = []
     for pnode, pty in zip(payload_pats, payload_types):
-        inner_decl = _enum_decl_for_type(pty, enums)
-        if inner_decl is None:
-            continue
-        universe = {name for name, _ in inner_decl.variants}
-        cov = _covered_enum_variants_by_pattern(pnode, inner_decl, enums)
-        if cov is None:
+        field_axes = _coverage_axes_for_pattern(pnode, pty, structs, enums)
+        if field_axes is None:
             return None, None
-        enum_axes.append((cov, universe))
-    if not enum_axes:
+        axes.extend(field_axes)
+    if not axes:
         return set(), set()
-    cov_keys = {tuple(parts) for parts in product(*(sorted(c) for c, _ in enum_axes))}
-    full_keys = {tuple(parts) for parts in product(*(sorted(u) for _, u in enum_axes))}
+    cov_keys = {tuple(parts) for parts in product(*(sorted(c) for c, _ in axes))}
+    full_keys = {tuple(parts) for parts in product(*(sorted(u) for _, u in axes))}
     return cov_keys, full_keys
+
+
+def _pattern_is_total_for_type(pat: Any, expected_ty: str, structs: dict[str, StructDecl], enums: dict[str, EnumDecl]) -> bool:
+    if isinstance(pat, WildcardPattern):
+        return True
+    if isinstance(pat, Name):
+        return True
+    exp_c = _canonical_type(expected_ty)
+    enum_decl = _enum_decl_for_type(exp_c, enums)
+    if enum_decl is not None:
+        variant_name = _enum_variant_name_for_pattern(pat, enum_decl.name)
+        if variant_name is None:
+            return False
+        # A single enum constructor never covers the full enum domain unless the
+        # pattern itself is a wildcard/binding (handled above).
+        return False
+    if exp_c in structs and isinstance(pat, Call) and isinstance(pat.fn, Name) and pat.fn.value == exp_c:
+        decl = structs[exp_c]
+        if len(pat.args) != len(decl.fields):
+            return False
+        return all(_pattern_is_total_for_type(pp, pty, structs, enums) for pp, (_, pty) in zip(pat.args, decl.fields))
+    return False
+
+
+def _analyze_pattern_against_type(
+    pat: Any,
+    expected_ty: str,
+    scopes: list[dict[str, str]],
+    mut_scopes: list[dict[str, bool]],
+    fn_groups: dict[str, list[FnDecl | ExternFnDecl]],
+    structs: dict[str, StructDecl],
+    enums: dict[str, EnumDecl],
+    owned: _OwnedState,
+    borrow: _BorrowState,
+    move: _MoveState,
+    filename: str,
+    fn_name: str,
+    unsafe_ok: bool,
+    gpu_kernel: bool,
+    bindings_for_arm: dict[str, str],
+) -> None:
+    if isinstance(pat, WildcardPattern):
+        return
+    if isinstance(pat, Name):
+        if pat.value == "_":
+            return
+        prev = bindings_for_arm.get(pat.value)
+        exp_c = _canonical_type(expected_ty)
+        if prev is not None and not _same_type(prev, exp_c):
+            raise SemanticError(
+                _diag(
+                    filename,
+                    pat.line,
+                    pat.col,
+                    f"pattern binding {pat.value} has conflicting types {prev} and {exp_c}",
+                )
+            )
+        bindings_for_arm[pat.value] = exp_c
+        return
+
+    exp_c = _canonical_type(expected_ty)
+    enum_decl = _enum_decl_for_type(exp_c, enums)
+    if enum_decl is not None:
+        variant_name = _enum_variant_name_for_pattern(pat, enum_decl.name)
+        if variant_name is not None:
+            payload_types = next((vtypes for vname, vtypes in enum_decl.variants if vname == variant_name), None)
+            if payload_types is None:
+                raise SemanticError(_diag(filename, pat.line, pat.col, f"unknown enum variant {enum_decl.name}.{variant_name}"))
+            payload_pats = _enum_variant_payload_patterns_for_pattern(pat, enum_decl.name) or []
+            if len(payload_pats) != len(payload_types):
+                raise SemanticError(
+                    _diag(
+                        filename,
+                        pat.line,
+                        pat.col,
+                        f"{enum_decl.name}.{variant_name} pattern expects {len(payload_types)} args, got {len(payload_pats)}",
+                    )
+                )
+            for pnode, pty in zip(payload_pats, payload_types):
+                _analyze_pattern_against_type(
+                    pnode,
+                    pty,
+                    scopes,
+                    mut_scopes,
+                    fn_groups,
+                    structs,
+                    enums,
+                    owned,
+                    borrow,
+                    move,
+                    filename,
+                    fn_name,
+                    unsafe_ok,
+                    gpu_kernel,
+                    bindings_for_arm,
+                )
+            return
+
+    if exp_c in structs and isinstance(pat, Call) and isinstance(pat.fn, Name):
+        struct_name = pat.fn.value
+        if struct_name != exp_c:
+            raise SemanticError(_diag(filename, pat.line, pat.col, f"match pattern expects {exp_c}, got {struct_name}"))
+        decl = structs[exp_c]
+        if len(pat.args) != len(decl.fields):
+            raise SemanticError(
+                _diag(
+                    filename,
+                    pat.line,
+                    pat.col,
+                    f"{exp_c} pattern expects {len(decl.fields)} args, got {len(pat.args)}",
+                )
+            )
+        for pnode, (_, fty) in zip(pat.args, decl.fields):
+            _analyze_pattern_against_type(
+                pnode,
+                fty,
+                scopes,
+                mut_scopes,
+                fn_groups,
+                structs,
+                enums,
+                owned,
+                borrow,
+                move,
+                filename,
+                fn_name,
+                unsafe_ok,
+                gpu_kernel,
+                bindings_for_arm,
+            )
+        return
+
+    pty = _infer(
+        pat,
+        scopes,
+        mut_scopes,
+        fn_groups,
+        structs,
+        enums,
+        owned,
+        borrow,
+        move,
+        filename,
+        fn_name,
+        unsafe_ok,
+        gpu_kernel,
+    )
+    _require_type(filename, pat.line, pat.col, expected_ty, pty, "match pattern")
 
 
 def _check_stmt(
@@ -1947,6 +2427,7 @@ def _check_stmt(
     fn_name: str,
     loop_depth: int,
     unsafe_ok: bool,
+    gpu_kernel: bool,
 ):
     def _is_narrowing_cond(expr: Any) -> tuple[str, str] | None:
         if not (isinstance(expr, Binary) and expr.op == "is"):
@@ -1955,12 +2436,24 @@ def _check_stmt(
             return None
         return expr.left.value, _canonical_type(expr.right.value)
 
+    if gpu_kernel and isinstance(st, (DeferStmt, ComptimeStmt, UnsafeStmt, DropStmt, MatchStmt)):
+        raise SemanticError(
+            _diag(
+                filename,
+                st.line,
+                st.col,
+                f"{type(st).__name__} is not supported in gpu kernels",
+            )
+        )
+
     if isinstance(st, LetStmt):
         if st.name == "_":
-            ty = _infer(st.expr, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok)
+            ty = _infer(st.expr, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok, gpu_kernel)
+            if gpu_kernel and not _is_gpu_safe_type(ty, structs):
+                raise SemanticError(_diag(filename, st.line, st.col, f"gpu kernel local `_` uses unsupported type {ty}"))
             _consume_if_move_name(st.expr, ty, borrow, move, filename, st.line, st.col)
             return
-        ty = _infer(st.expr, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok)
+        ty = _infer(st.expr, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok, gpu_kernel)
         if ty == NONE_LIT_TYPE and st.type_name is None:
             raise SemanticError(_diag(filename, st.line, st.col, f"`none` requires explicit nullable type for {st.name}"))
         if st.type_name is not None:
@@ -1996,8 +2489,11 @@ def _check_stmt(
                 fn_name,
                 loop_depth,
                 unsafe_ok,
+                gpu_kernel,
             )
             return
+        if gpu_kernel and not _is_gpu_safe_type(ty, structs):
+            raise SemanticError(_diag(filename, st.line, st.col, f"gpu kernel local {st.name} uses unsupported type {ty}"))
         if st.name in scopes[-1]:
             borrow.release_ref(st.name)
         if st.name not in move_scopes[-1]:
@@ -2030,7 +2526,25 @@ def _check_stmt(
             owned.track_alloc(st.name)
         return
     if isinstance(st, AssignStmt):
-        rhs = _infer(st.expr, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok)
+        rhs = _infer(st.expr, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok, gpu_kernel)
+        if gpu_kernel and isinstance(st.target, IndexExpr):
+            target_obj_ty = _infer(
+                st.target.obj,
+                scopes,
+                mut_scopes,
+                fn_groups,
+                structs,
+                enums,
+                owned,
+                borrow,
+                move,
+                filename,
+                fn_name,
+                unsafe_ok,
+                gpu_kernel,
+            )
+            if _is_gpu_slice_type(target_obj_ty):
+                raise SemanticError(_diag(filename, st.line, st.col, "cannot write through immutable GpuSlice<T> in gpu kernel"))
         base = _assign_base_name(st.target)
         if base is not None:
             borrow.check_write(base, filename, st.line, st.col)
@@ -2081,16 +2595,21 @@ def _check_stmt(
             _assign(st.target.value, lhs, scopes, filename, st.line, st.col)
             move.reinitialize(st.target.value)
             return
-        lhs = _infer(st.target, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok)
+        lhs = _infer(st.target, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok, gpu_kernel)
         _require_compound_assign_compat(filename, st.line, st.col, st.op, lhs, rhs)
         if st.op in {"<<=", ">>="}:
             _require_shift_rhs_static_safe(filename, st.op, lhs, st.expr)
         return
     if isinstance(st, ReturnStmt):
-        expr_ty = "Void" if st.expr is None else _infer(st.expr, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok)
+        expr_ty = "Void" if st.expr is None else _infer(st.expr, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok, gpu_kernel)
         _require_type(filename, st.line, st.col, fn_ret, expr_ty, "return")
-        if _is_ref_type(fn_ret) and st.expr is not None and not _ref_return_tied_to_param(st.expr, ref_param_names, borrow):
-            raise SemanticError(_diag(filename, st.line, st.col, "returned reference is not tied to an input reference parameter"))
+        if _is_ref_type(fn_ret) and st.expr is not None:
+            tied, note = _ref_return_tie_info(st.expr, ref_param_names, borrow)
+            if not tied:
+                msg = "returned reference is not tied to an input reference parameter"
+                if note:
+                    msg = f"{msg}: {note}"
+                raise SemanticError(_diag(filename, st.line, st.col, msg))
         if isinstance(st.expr, Name):
             owned.invalidate(st.expr.value)
         if st.expr is not None:
@@ -2105,7 +2624,7 @@ def _check_stmt(
             raise SemanticError(_diag(filename, st.line, st.col, "continue used outside loop"))
         return
     if isinstance(st, DeferStmt):
-        _infer(st.expr, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok)
+        _infer(st.expr, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok, gpu_kernel)
         return
     if isinstance(st, ComptimeStmt):
         _check_block(
@@ -2126,6 +2645,7 @@ def _check_stmt(
             fn_name,
             loop_depth,
             unsafe_ok,
+            gpu_kernel,
         )
         return
     if isinstance(st, UnsafeStmt):
@@ -2147,10 +2667,11 @@ def _check_stmt(
             fn_name,
             loop_depth,
             True,
+            gpu_kernel,
         )
         return
     if isinstance(st, IfStmt):
-        cond_ty = _infer(st.cond, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok)
+        cond_ty = _infer(st.cond, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok, gpu_kernel)
         _require_type(filename, st.line, st.col, "Bool", cond_ty, "if condition")
         then_owned = owned.copy()
         then_scopes = scopes + [{}]
@@ -2184,6 +2705,7 @@ def _check_stmt(
             fn_name,
             loop_depth,
             unsafe_ok,
+            gpu_kernel,
         )
         else_owned = owned.copy()
         else_scopes = scopes + [{}]
@@ -2215,13 +2737,14 @@ def _check_stmt(
             fn_name,
             loop_depth,
             unsafe_ok,
+            gpu_kernel,
         )
         owned.merge(then_owned, else_owned)
         borrow.merge(then_borrow, else_borrow)
         move.merge(then_move, else_move)
         return
     if isinstance(st, WhileStmt):
-        cond_ty = _infer(st.cond, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok)
+        cond_ty = _infer(st.cond, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok, gpu_kernel)
         _require_type(filename, st.line, st.col, "Bool", cond_ty, "while condition")
         loop_owned = owned.copy()
         loop_scopes = scopes + [{}]
@@ -2248,6 +2771,7 @@ def _check_stmt(
             fn_name,
             loop_depth + 1,
             unsafe_ok,
+            gpu_kernel,
         )
         owned.merge(owned, loop_owned)
         borrow.merge(borrow, loop_borrow)
@@ -2256,14 +2780,14 @@ def _check_stmt(
     if isinstance(st, ForStmt):
         loop_var_ty: str
         if isinstance(st.iterable, RangeExpr):
-            start_ty = _infer(st.iterable.start, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok)
-            end_ty = _infer(st.iterable.end, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok)
+            start_ty = _infer(st.iterable.start, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok, gpu_kernel)
+            end_ty = _infer(st.iterable.end, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok, gpu_kernel)
             if not _is_int_type(start_ty) or not _is_int_type(end_ty):
                 raise SemanticError(_diag(filename, st.line, st.col, "range for-in expects integer bounds"))
             _require_type(filename, st.line, st.col, start_ty, end_ty, "for-in range bounds")
             loop_var_ty = _canonical_type(start_ty)
         else:
-            iterable_ty = _infer(st.iterable, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok)
+            iterable_ty = _infer(st.iterable, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok, gpu_kernel)
             base_ty = _strip_ref(_canonical_type(iterable_ty))
             if _is_vec_type(base_ty):
                 loop_var_ty = _vec_inner(base_ty)
@@ -2280,6 +2804,8 @@ def _check_stmt(
                         f"for-in over {iterable_ty} currently requires Copy element type, got {loop_var_ty}",
                     )
                 )
+        if gpu_kernel and not _is_gpu_safe_type(loop_var_ty, structs):
+            raise SemanticError(_diag(filename, st.line, st.col, f"gpu kernel loop variable {st.var} uses unsupported type {loop_var_ty}"))
         loop_scopes = scopes + [{}]
         loop_mut_scopes = mut_scopes + [{}]
         loop_owned = owned.copy()
@@ -2308,13 +2834,14 @@ def _check_stmt(
             fn_name,
             loop_depth + 1,
             unsafe_ok,
+            gpu_kernel,
         )
         owned.merge(owned, loop_owned)
         borrow.merge(borrow, loop_borrow)
         move.merge(move, loop_move)
         return
     if isinstance(st, MatchStmt):
-        subject_ty = _infer(st.expr, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok)
+        subject_ty = _infer(st.expr, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok, gpu_kernel)
         seen_bool: set[bool] = set()
         seen_enum_variants: set[str] = set()
         nested_enum_coverage: dict[str, set[tuple[str, ...]]] = {}
@@ -2344,6 +2871,7 @@ def _check_stmt(
                     filename,
                     fn_name,
                     unsafe_ok,
+                    gpu_kernel,
                 )
                 _require_type(filename, st.line, st.col, "Bool", gty, "match guard")
 
@@ -2396,26 +2924,11 @@ def _check_stmt(
                                     f"{enum_name}.{variant_name} pattern expects {len(payload_types)} args, got {len(payload_pats)}",
                                 )
                             )
-                        variant_total = True
                         bindings_for_arm: dict[str, str] = {}
                         for pnode, pty in zip(payload_pats, payload_types):
-                            if isinstance(pnode, Name) and pnode.value == "_":
-                                continue
-                            if isinstance(pnode, Name):
-                                prev = bindings_for_arm.get(pnode.value)
-                                if prev is not None and not _same_type(prev, pty):
-                                    raise SemanticError(
-                                        _diag(
-                                            filename,
-                                            pnode.line,
-                                            pnode.col,
-                                            f"pattern binding {pnode.value} has conflicting types {prev} and {pty}",
-                                        )
-                                    )
-                                bindings_for_arm[pnode.value] = _canonical_type(pty)
-                                continue
-                            pnode_ty = _infer(
+                            _analyze_pattern_against_type(
                                 pnode,
+                                pty,
                                 scopes,
                                 mut_scopes,
                                 fn_groups,
@@ -2427,9 +2940,12 @@ def _check_stmt(
                                 filename,
                                 fn_name,
                                 unsafe_ok,
+                                gpu_kernel,
+                                bindings_for_arm,
                             )
-                            _require_type(filename, pnode.line, pnode.col, pty, pnode_ty, "enum payload pattern")
-                            variant_total = False
+                        variant_total = all(
+                            _pattern_is_total_for_type(pnode, pty, structs, enums) for pnode, pty in zip(payload_pats, payload_types)
+                        )
                         if variant_total:
                             if variant_name in seen_enum_variants:
                                 raise SemanticError(
@@ -2437,7 +2953,7 @@ def _check_stmt(
                                 )
                             seen_enum_variants.add(variant_name)
                         else:
-                            cov_keys, full_keys = _variant_payload_coverage_keys(payload_pats, payload_types, enums)
+                            cov_keys, full_keys = _variant_payload_coverage_keys(payload_pats, payload_types, structs, enums)
                             if cov_keys is not None and full_keys is not None and full_keys:
                                 nested_enum_universe.setdefault(variant_name, full_keys)
                                 current = nested_enum_coverage.setdefault(variant_name, set())
@@ -2466,8 +2982,10 @@ def _check_stmt(
                         continue
                 if handled_enum_pattern:
                     continue
-                pty = _infer(
+                bindings_for_arm = {}
+                _analyze_pattern_against_type(
                     alt_pat,
+                    subject_ty,
                     scopes,
                     mut_scopes,
                     fn_groups,
@@ -2479,9 +2997,10 @@ def _check_stmt(
                     filename,
                     fn_name,
                     unsafe_ok,
+                    gpu_kernel,
+                    bindings_for_arm,
                 )
-                if subject_ty != "Any":
-                    _require_type(filename, st.line, st.col, subject_ty, pty, "match pattern")
+                setattr(alt_pat, "_pattern_bindings", bindings_for_arm)
             arm_scopes = scopes + [{}]
             arm_mut_scopes = mut_scopes + [{}]
             arm_borrow_scopes = borrow_scopes + [set()]
@@ -2510,6 +3029,7 @@ def _check_stmt(
                 fn_name,
                 loop_depth,
                 unsafe_ok,
+                gpu_kernel,
             )
         if subject_ty == "Bool" and not seen_wildcard and seen_bool != {True, False}:
             raise SemanticError(_diag(filename, st.line, st.col, "non-exhaustive match for Bool"))
@@ -2517,17 +3037,36 @@ def _check_stmt(
             all_variants = {name for name, _ in subject_enum_decl.variants}
             if seen_enum_variants != all_variants:
                 missing = ", ".join(sorted(all_variants - seen_enum_variants))
+                detail_parts: list[str] = []
+                for variant_name in sorted(all_variants - seen_enum_variants):
+                    full_keys = nested_enum_universe.get(variant_name)
+                    if not full_keys:
+                        continue
+                    covered = nested_enum_coverage.get(variant_name, set())
+                    missing_keys = sorted(full_keys - covered)
+                    if not missing_keys:
+                        continue
+                    preview = ", ".join(
+                        "/".join(parts) if parts else "<all>"
+                        for parts in missing_keys[:3]
+                    )
+                    if len(missing_keys) > 3:
+                        preview = f"{preview} (+{len(missing_keys) - 3} more)"
+                    detail_parts.append(f"{variant_name} payload combinations missing: {preview}")
+                detail = ""
+                if detail_parts:
+                    detail = "; " + "; ".join(detail_parts)
                 raise SemanticError(
                     _diag(
                         filename,
                         st.line,
                         st.col,
-                        f"non-exhaustive match for enum {subject_enum_decl.name}; missing variants: {missing}",
+                        f"non-exhaustive match for enum {subject_enum_decl.name}; missing variants: {missing}{detail}",
                     )
                 )
         return
     if isinstance(st, ExprStmt):
-        _infer(st.expr, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok)
+        _infer(st.expr, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok, gpu_kernel)
         if _is_free_call(st.expr):
             ptr = st.expr.args[0]
             if not isinstance(ptr, Name):
@@ -2535,7 +3074,7 @@ def _check_stmt(
             owned.free(ptr.value, Span.at(filename, st.line, st.col))
         return
     if isinstance(st, DropStmt):
-        expr_ty = _infer(st.expr, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok)
+        expr_ty = _infer(st.expr, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok, gpu_kernel)
         _consume_if_move_name(st.expr, expr_ty, borrow, move, filename, st.line, st.col)
         if isinstance(st.expr, Name):
             if st.expr.value in owned.owners:
@@ -2562,6 +3101,7 @@ def _infer(
     filename: str,
     fn_name: str,
     unsafe_ok: bool,
+    gpu_kernel: bool,
 ):
     if isinstance(e, WildcardPattern):
         raise SemanticError(_diag(filename, e.line, e.col, "wildcard pattern `_` is only valid in match arms"))
@@ -2601,6 +3141,9 @@ def _infer(
             return _typed(e, "Any")
         sig = BUILTIN_SIGS.get(e.value)
         if sig is not None:
+            base = _builtin_base_name(e.value)
+            if gpu_kernel and base not in GPU_ALLOWED_IN_KERNEL_BUILTINS:
+                raise SemanticError(_diag(filename, e.line, e.col, f"builtin {base} is not available in gpu kernels"))
             _require_freestanding_builtin_allowed(e.value, filename, e.line, e.col)
             if sig.args is None:
                 return _typed(e, "Any")
@@ -2651,7 +3194,7 @@ def _infer(
         owned_copy = owned.copy() if owned is not None else None
         borrow_copy = borrow.copy()
         move_copy = move.copy()
-        val_ty = _infer(e.expr, scopes, mut_scopes, fn_groups, structs, enums, owned_copy, borrow_copy, move_copy, filename, fn_name, unsafe_ok)
+        val_ty = _infer(e.expr, scopes, mut_scopes, fn_groups, structs, enums, owned_copy, borrow_copy, move_copy, filename, fn_name, unsafe_ok, gpu_kernel)
         try:
             layout_of_type(val_ty, structs, mode="query")
         except LayoutError as err:
@@ -2659,9 +3202,13 @@ def _infer(
         setattr(e, "query_type", _canonical_type(val_ty))
         return _typed(e, "Int")
     if isinstance(e, AwaitExpr):
-        return _typed(e, _infer(e.expr, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok))
+        if gpu_kernel:
+            raise SemanticError(_diag(filename, e.line, e.col, "await is not supported in gpu kernels"))
+        return _typed(e, _infer(e.expr, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok, gpu_kernel))
     if isinstance(e, TryExpr):
-        src_ty = _infer(e.expr, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok)
+        if gpu_kernel:
+            raise SemanticError(_diag(filename, e.line, e.col, "try propagation (`!`) is not supported in gpu kernels"))
+        src_ty = _infer(e.expr, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok, gpu_kernel)
         fn_ret = _canonical_type(getattr(move, "fn_ret", ""))
         src_c = _canonical_type(src_ty)
         if _is_union_type(src_c):
@@ -2706,7 +3253,7 @@ def _infer(
             if e.op == "&mut":
                 return _typed(e, f"&mut {owner_ty}")
             return _typed(e, f"&{owner_ty}")
-        inner = _infer(e.expr, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok)
+        inner = _infer(e.expr, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok, gpu_kernel)
         if e.op == "!":
             _require_type(filename, e.line, e.col, "Bool", inner, "unary !")
             return _typed(e, "Bool")
@@ -2720,7 +3267,7 @@ def _infer(
             return _typed(e, _strip_ref(inner))
         return _typed(e, inner)
     if isinstance(e, CastExpr):
-        src = _infer(e.expr, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok)
+        src = _infer(e.expr, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok, gpu_kernel)
         dst = _canonical_type(e.type_name)
         _validate_decl_type(dst, filename, e.line, e.col)
         src_c = _canonical_type(src)
@@ -2734,14 +3281,14 @@ def _infer(
             raise SemanticError(_diag(filename, e.line, e.col, f"unsupported cast from {src} to {e.type_name}"))
         return _typed(e, dst)
     if isinstance(e, TypeAnnotated):
-        src = _infer(e.expr, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok)
+        src = _infer(e.expr, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok, gpu_kernel)
         dst = _canonical_type(e.type_name)
         _validate_decl_type(dst, filename, e.line, e.col)
         _require_type(filename, e.line, e.col, dst, src, "type annotation")
         return _typed(e, dst)
     if isinstance(e, Binary):
-        l = _infer(e.left, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok)
-        r = _infer(e.right, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok)
+        l = _infer(e.left, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok, gpu_kernel)
+        r = _infer(e.right, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok, gpu_kernel)
         l_eff = _strip_ref(l)
         r_eff = _strip_ref(r)
         if e.op in {"+", "-", "*", "/", "%"}:
@@ -2786,10 +3333,10 @@ def _infer(
             return _typed(e, inner)
         return _typed(e, "Any")
     if isinstance(e, Call):
-        return _typed(e, _infer_call(e, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok))
+        return _typed(e, _infer_call(e, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok, gpu_kernel))
     if isinstance(e, IndexExpr):
-        obj_ty = _infer(e.obj, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok)
-        idx_ty = _infer(e.index, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok)
+        obj_ty = _infer(e.obj, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok, gpu_kernel)
+        idx_ty = _infer(e.index, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok, gpu_kernel)
         _require_type(filename, e.line, e.col, "Int", idx_ty, "index")
         base_ty = _strip_ref(_canonical_type(obj_ty))
         if base_ty in {"String", "str"}:
@@ -2805,6 +3352,10 @@ def _infer(
             return _typed(e, _slice_inner(base_ty))
         if _is_vec_type(base_ty):
             return _typed(e, _vec_inner(base_ty))
+        if _is_gpu_memory_type(base_ty):
+            inner = _gpu_element_type(base_ty)
+            if inner is not None:
+                return _typed(e, inner)
         return _typed(e, "Any")
     if isinstance(e, FieldExpr):
         if isinstance(e.obj, Name) and _lookup(e.obj.value, scopes) is None and e.obj.value in enums:
@@ -2822,20 +3373,22 @@ def _infer(
             if enum_decl.generics:
                 ret = f"{enum_decl.name}<{', '.join('Any' for _ in enum_decl.generics)}>"
             return _typed(e, ret)
-        obj_ty = _infer(e.obj, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok)
+        obj_ty = _infer(e.obj, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok, gpu_kernel)
         # Strip reference types to get the underlying struct type
         base_ty = _strip_ref(obj_ty)
         if base_ty in structs:
             for fname, fty in structs[base_ty].fields:
                 if fname == e.field:
                     return _typed(e, fty)
+        if _is_gpu_memory_type(base_ty) and e.field == "len":
+            return _typed(e, "fn() -> Int")
         return _typed(e, "Any")
     if isinstance(e, ArrayLit):
         if not e.elements:
             return _typed(e, "[Any]")
-        first_ty = _infer(e.elements[0], scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok)
+        first_ty = _infer(e.elements[0], scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok, gpu_kernel)
         for el in e.elements[1:]:
-            ety = _infer(el, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok)
+            ety = _infer(el, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok, gpu_kernel)
             _require_type(filename, el.line, el.col, first_ty, ety, "array element")
         return _typed(e, f"[{first_ty}]")
     if isinstance(e, StructLit):
@@ -2855,7 +3408,7 @@ def _infer(
             fexpr = field_map.get(fname)
             if fexpr is None:
                 raise SemanticError(_diag(filename, e.line, e.col, f"missing field {fname} for struct {e.name}"))
-            ety = _infer(fexpr, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok)
+            ety = _infer(fexpr, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok, gpu_kernel)
             _require_type(filename, getattr(fexpr, "line", e.line), getattr(fexpr, "col", e.col), fty, ety, f"field {fname} of {e.name}")
         return _typed(e, e.name)
     return _typed(e, "Any")
@@ -2881,6 +3434,115 @@ def _check_call_arg_borrows(
             temp.shared_counts[owner] = temp.shared_counts.get(owner, 0) + 1
 
 
+def _infer_gpu_namespace_call(
+    e: Call,
+    method: str,
+    arg_types: list[str],
+    fn_groups: dict[str, list[FnDecl | ExternFnDecl]],
+    structs: dict[str, StructDecl],
+    enums: dict[str, EnumDecl],
+    filename: str,
+    gpu_kernel: bool,
+) -> str:
+    if method in GPU_KERNEL_BUILTINS:
+        if not gpu_kernel:
+            raise SemanticError(_diag(filename, e.line, e.col, f"gpu.{method}() is only valid inside gpu kernels"))
+        if len(e.args) != 0:
+            raise SemanticError(_diag(filename, e.line, e.col, f"gpu.{method} expects 0 args, got {len(e.args)}"))
+        if method == "barrier":
+            return "Void"
+        return "Int"
+
+    if method not in GPU_HOST_APIS:
+        raise SemanticError(_diag(filename, e.line, e.col, f"unknown gpu API gpu.{method}"))
+    if gpu_kernel:
+        raise SemanticError(_diag(filename, e.line, e.col, f"gpu.{method}() is host-only and cannot run inside gpu kernels"))
+
+    if method == "available":
+        if len(e.args) != 0:
+            raise SemanticError(_diag(filename, e.line, e.col, f"gpu.available expects 0 args, got {len(e.args)}"))
+        return "Bool"
+    if method == "device_count":
+        if len(e.args) != 0:
+            raise SemanticError(_diag(filename, e.line, e.col, f"gpu.device_count expects 0 args, got {len(e.args)}"))
+        return "Int"
+    if method == "device_name":
+        if len(e.args) != 1:
+            raise SemanticError(_diag(filename, e.line, e.col, f"gpu.device_name expects 1 args, got {len(e.args)}"))
+        _require_type(filename, e.args[0].line, e.args[0].col, "Int", arg_types[0], "arg 0 for gpu.device_name")
+        return "String"
+    if method == "alloc":
+        if len(e.args) != 1:
+            raise SemanticError(_diag(filename, e.line, e.col, f"gpu.alloc expects 1 args, got {len(e.args)}"))
+        _require_type(filename, e.args[0].line, e.args[0].col, "Int", arg_types[0], "arg 0 for gpu.alloc")
+        return "GpuBuffer<Any>"
+    if method == "copy":
+        if len(e.args) != 1:
+            raise SemanticError(_diag(filename, e.line, e.col, f"gpu.copy expects 1 args, got {len(e.args)}"))
+        src_ty = _canonical_type(arg_types[0])
+        if _is_slice_type(src_ty):
+            return f"GpuBuffer<{_slice_inner(src_ty)}>"
+        if _is_vec_type(src_ty):
+            return f"GpuBuffer<{_vec_inner(src_ty)}>"
+        raise SemanticError(_diag(filename, e.args[0].line, e.args[0].col, f"gpu.copy expects [T] or Vec<T>, got {src_ty}"))
+    if method == "read":
+        if len(e.args) != 1:
+            raise SemanticError(_diag(filename, e.line, e.col, f"gpu.read expects 1 args, got {len(e.args)}"))
+        src_ty = _canonical_type(arg_types[0])
+        inner = _gpu_element_type(src_ty)
+        if inner is None:
+            raise SemanticError(_diag(filename, e.args[0].line, e.args[0].col, f"gpu.read expects GpuBuffer<T>/GpuSlice<T>/GpuMutSlice<T>, got {src_ty}"))
+        return f"[{inner}]"
+
+    # gpu.launch(kernel, grid_size, block_size, ...args)
+    if len(e.args) < 3:
+        raise SemanticError(_diag(filename, e.line, e.col, "gpu.launch expects at least 3 args: kernel, grid_size, block_size"))
+    _require_type(filename, e.args[1].line, e.args[1].col, "Int", arg_types[1], "arg 1 for gpu.launch")
+    _require_type(filename, e.args[2].line, e.args[2].col, "Int", arg_types[2], "arg 2 for gpu.launch")
+
+    kernel_expr = e.args[0]
+    launch_arg_types = arg_types[3:]
+    launch_args = e.args[3:]
+    if isinstance(kernel_expr, Name) and kernel_expr.value in fn_groups:
+        kernel_name = kernel_expr.value
+        candidates = [
+            d for d in fn_groups[kernel_name] if isinstance(d, FnDecl) and bool(getattr(d, "gpu_kernel", False))
+        ]
+        if not candidates:
+            raise SemanticError(_diag(filename, kernel_expr.line, kernel_expr.col, f"gpu.launch expects a gpu fn kernel, got `{kernel_name}`"))
+        matching: list[FnDecl] = []
+        for cand in candidates:
+            if len(cand.params) != len(launch_arg_types):
+                continue
+            if all(_gpu_launch_arg_compatible(pty, aty) for (_, pty), aty in zip(cand.params, launch_arg_types)):
+                matching.append(cand)
+        if not matching:
+            sig = ", ".join(launch_arg_types)
+            raise SemanticError(_diag(filename, e.line, e.col, f"no matching gpu kernel overload for launch {kernel_name}({sig})"))
+        if len(matching) > 1:
+            raise SemanticError(_diag(filename, e.line, e.col, f"ambiguous gpu kernel overload for launch {kernel_name}"))
+        chosen = matching[0]
+        for i, ((_, expected), arg, aty) in enumerate(zip(chosen.params, launch_args, launch_arg_types), start=3):
+            if not _gpu_launch_arg_compatible(expected, aty):
+                raise SemanticError(_diag(filename, arg.line, arg.col, f"arg {i} for gpu.launch kernel expects {expected}, got {aty}"))
+        setattr(e, "launch_resolved_name", chosen.symbol or chosen.name)
+        return "Void"
+
+    kernel_ty = _canonical_type(arg_types[0])
+    parsed = _parse_fn_type(kernel_ty)
+    if parsed is None:
+        raise SemanticError(_diag(filename, kernel_expr.line, kernel_expr.col, "gpu.launch arg 0 must be a gpu kernel function"))
+    param_tys, ret_ty, _ = parsed
+    if _canonical_type(ret_ty) != "Void":
+        raise SemanticError(_diag(filename, kernel_expr.line, kernel_expr.col, "gpu.launch kernel function must return Void"))
+    if len(param_tys) != len(launch_arg_types):
+        raise SemanticError(_diag(filename, e.line, e.col, f"gpu.launch kernel expects {len(param_tys)} args, got {len(launch_arg_types)}"))
+    for i, (expected, arg, aty) in enumerate(zip(param_tys, launch_args, launch_arg_types), start=3):
+        if not _gpu_launch_arg_compatible(expected, aty):
+            raise SemanticError(_diag(filename, arg.line, arg.col, f"arg {i} for gpu.launch kernel expects {expected}, got {aty}"))
+    return "Void"
+
+
 def _infer_call(
     e: Call,
     scopes: list[dict[str, str]],
@@ -2894,17 +3556,27 @@ def _infer_call(
     filename: str,
     fn_name: str,
     unsafe_ok: bool,
+    gpu_kernel: bool,
 ) -> str:
     spawn_like = False
+    gpu_launch_like = False
     if isinstance(e.fn, Name):
         base = e.fn.value[2:] if e.fn.value.startswith("__") else e.fn.value
         spawn_like = base == "spawn"
+    if (
+        isinstance(e.fn, FieldExpr)
+        and isinstance(e.fn.obj, Name)
+        and e.fn.obj.value == "gpu"
+        and _lookup("gpu", scopes) is None
+        and e.fn.field == "launch"
+    ):
+        gpu_launch_like = True
     arg_types: list[str] = []
     for i, arg in enumerate(e.args):
-        if spawn_like and i == 0 and isinstance(arg, Name) and arg.value in fn_groups and len(fn_groups[arg.value]) > 1:
+        if (spawn_like or gpu_launch_like) and i == 0 and isinstance(arg, Name) and arg.value in fn_groups and len(fn_groups[arg.value]) > 1:
             arg_types.append("Any")
             continue
-        arg_types.append(_infer(arg, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok))
+        arg_types.append(_infer(arg, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok, gpu_kernel))
     _check_call_arg_borrows(e.args, mut_scopes, borrow, filename)
 
     def _require_unsafe_context(callee_name: str, line: int, col: int) -> None:
@@ -2912,9 +3584,19 @@ def _infer_call(
             return
         raise SemanticError(_diag(filename, line, col, f"call to unsafe function {callee_name} requires unsafe context"))
 
+    if (
+        isinstance(e.fn, FieldExpr)
+        and isinstance(e.fn.obj, Name)
+        and e.fn.obj.value == "gpu"
+        and _lookup("gpu", scopes) is None
+    ):
+        return _infer_gpu_namespace_call(e, e.fn.field, arg_types, fn_groups, structs, enums, filename, gpu_kernel)
+
     if isinstance(e.fn, Name):
         name = e.fn.value
         builtin_base = name[2:] if name.startswith("__") else name
+        if gpu_kernel and builtin_base in BUILTIN_SIGS and builtin_base not in GPU_ALLOWED_IN_KERNEL_BUILTINS:
+            raise SemanticError(_diag(filename, e.line, e.col, f"builtin {builtin_base} is not available in gpu kernels"))
         if builtin_base == "spawn":
             if len(e.args) < 1:
                 raise SemanticError(_diag(filename, e.line, e.col, f"{name} expects at least a function argument"))
@@ -3026,7 +3708,17 @@ def _infer_call(
             return "Int"
         if name in fn_groups:
             known_types = set(PRIMITIVES) | set(structs.keys()) | set(enums.keys())
+            if not gpu_kernel:
+                gpu_decls = [d for d in fn_groups[name] if isinstance(d, FnDecl) and bool(getattr(d, "gpu_kernel", False))]
+                host_decls = [d for d in fn_groups[name] if not (isinstance(d, FnDecl) and bool(getattr(d, "gpu_kernel", False)))]
+                if gpu_decls and not host_decls:
+                    raise SemanticError(_diag(filename, e.line, e.col, f"gpu kernel {name} cannot be called directly; use gpu.launch"))
             decl = _choose_impl(name, fn_groups[name], arg_types, known_types, filename, e.line, e.col)
+            if isinstance(decl, FnDecl) and bool(getattr(decl, "gpu_kernel", False)):
+                if not gpu_kernel:
+                    raise SemanticError(_diag(filename, e.line, e.col, f"gpu kernel {name} cannot be called directly; use gpu.launch"))
+            elif gpu_kernel:
+                raise SemanticError(_diag(filename, e.line, e.col, f"gpu kernels cannot call host function {name}"))
             if getattr(decl, "unsafe", False):
                 _require_unsafe_context(name, e.line, e.col)
             is_variadic = bool(getattr(decl, "is_variadic", False))
@@ -3055,6 +3747,8 @@ def _infer_call(
             return _substitute_typevars(decl.ret, type_bindings)
         local = _lookup(name, scopes)
         if local is not None:
+            if gpu_kernel:
+                raise SemanticError(_diag(filename, e.line, e.col, "function-pointer calls are not supported in gpu kernels"))
             setattr(e.fn, "inferred_type", local)
             parsed = _parse_fn_type(local)
             if parsed is None:
@@ -3081,6 +3775,9 @@ def _infer_call(
             return name
         sig = BUILTIN_SIGS.get(name)
         if sig is not None:
+            base = _builtin_base_name(name)
+            if gpu_kernel and base not in GPU_ALLOWED_IN_KERNEL_BUILTINS:
+                raise SemanticError(_diag(filename, e.line, e.col, f"builtin {base} is not available in gpu kernels"))
             _require_freestanding_builtin_allowed(name, filename, e.line, e.col)
             if sig.args is not None and len(e.args) != len(sig.args):
                 raise SemanticError(_diag(filename, e.line, e.col, f"{name} expects {len(sig.args)} args, got {len(e.args)}"))
@@ -3138,12 +3835,17 @@ def _infer_call(
                 bound = [type_bindings.get(tp, fn_ret_defaults.get(tp, "Any")) for tp in enum_decl.generics]
                 return f"{enum_decl.name}<{', '.join(bound)}>"
             return enum_decl.name
-        obj_ty = _infer(e.fn.obj, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok)
+        obj_ty = _infer(e.fn.obj, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok, gpu_kernel)
         if e.fn.field in fn_groups:
             ufcs_name = e.fn.field
             all_arg_types = [obj_ty] + arg_types
             known_types = set(PRIMITIVES) | set(structs.keys()) | set(enums.keys())
             decl = _choose_impl(ufcs_name, fn_groups[ufcs_name], all_arg_types, known_types, filename, e.line, e.col)
+            if isinstance(decl, FnDecl) and bool(getattr(decl, "gpu_kernel", False)):
+                if not gpu_kernel:
+                    raise SemanticError(_diag(filename, e.line, e.col, f"gpu kernel {ufcs_name} cannot be called directly; use gpu.launch"))
+            elif gpu_kernel:
+                raise SemanticError(_diag(filename, e.line, e.col, f"gpu kernels cannot call host function {ufcs_name}"))
             if getattr(decl, "unsafe", False):
                 _require_unsafe_context(ufcs_name, e.line, e.col)
             if len(decl.params) != len(all_arg_types):
@@ -3185,8 +3887,16 @@ def _infer_call(
                 return f"Option<{_slice_inner(base_ty)}>"
             if _is_vec_type(base_ty):
                 return f"Option<{_vec_inner(base_ty)}>"
+        if e.fn.field == "len":
+            if len(e.args) != 0:
+                raise SemanticError(_diag(filename, e.line, e.col, "len expects 0 args"))
+            base_ty = _strip_ref(_canonical_type(obj_ty))
+            if _is_vec_type(base_ty) or _is_slice_type(base_ty) or _is_gpu_memory_type(base_ty):
+                return "Int"
         return "Any"
-    callee_ty = _infer(e.fn, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok)
+    callee_ty = _infer(e.fn, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok, gpu_kernel)
+    if gpu_kernel:
+        raise SemanticError(_diag(filename, e.line, e.col, "function-pointer calls are not supported in gpu kernels"))
     setattr(e.fn, "inferred_type", callee_ty)
     parsed = _parse_fn_type(callee_ty)
     if parsed is None:

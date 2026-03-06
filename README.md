@@ -9,6 +9,7 @@ Astra is a compact programming language ecosystem with a full compiler pipeline,
 - Static checking pipeline with parse, compile-time, and semantic diagnostics.
 - Built-in tooling: formatter (`astfmt`), linter (`astlint`), doc generator (`astdoc`), package helper (`astpm`), LSP server (`astlsp`), debugger (`astdbg`), and profiler (`astprof`).
 - Hosted and freestanding compilation modes.
+- First-class GPU compute subsystem with `gpu fn`, explicit device buffers, and `gpu.launch`.
 - Standard library modules for core types, collections, I/O, networking, process control, serialization, crypto, and time.
 - Runtime-backed builtin APIs that mirror stdlib entry points used by the current semantic/codegen pipeline.
 
@@ -52,6 +53,7 @@ python build/hello.py
 - Standard library reference: `docs/stdlib/`
 - Tooling and CLI docs: `docs/tooling/`
 - Compiler internals: `docs/compiler/`
+- GPU subsystem docs: `docs/gpu/`
 - Contributor/development docs: `docs/development/`
 
 Current compiler behavior note:

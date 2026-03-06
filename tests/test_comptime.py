@@ -140,3 +140,46 @@ fn main() Int{
     build(str(src), str(out), "py")
     text = out.read_text()
     assert "internal = 7" not in text
+
+
+def test_comptime_try_operator_reports_current_syntax(tmp_path: Path):
+    src = tmp_path / "try_not_supported.astra"
+    out = tmp_path / "try_not_supported.py"
+    src.write_text(
+        """
+fn maybe() Int?{
+  return 1;
+}
+fn main() Int{
+  comptime {
+    x = maybe()!;
+  }
+  return x ?? 0;
+}
+"""
+    )
+    try:
+        build(str(src), str(out), "py")
+        assert False
+    except Exception as e:
+        assert "`!` is not supported in comptime expressions" in str(e)
+
+
+def test_comptime_bans_time_builtins_for_determinism(tmp_path: Path):
+    src = tmp_path / "time_banned.astra"
+    out = tmp_path / "time_banned.py"
+    src.write_text(
+        """
+fn main() Int{
+  comptime {
+    t = now_unix();
+  }
+  return 0;
+}
+"""
+    )
+    try:
+        build(str(src), str(out), "py")
+        assert False
+    except Exception as e:
+        assert "non-pure function now_unix" in str(e)

@@ -13,7 +13,15 @@ Responsibilities:
 - borrow/move safety checks
 - builtin validation and freestanding restrictions
 - function/return/entrypoint validation
+- pattern exhaustiveness/redundancy checks
+- trait/generic constraint validation
 
 Error type:
 
 - `SemanticError`
+
+Current expansion focus:
+
+- trait coherence and richer generic-resolution diagnostics
+- deeper structural pattern analysis for exhaustiveness
+- expanded lifetime/region reasoning diagnostics

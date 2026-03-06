@@ -23,3 +23,8 @@ Current limits:
 - No key/nonce typed wrappers
 - No AEAD/KDF/RNG API in stdlib yet
 - No constant-time guarantees documented at language level
+
+Near-term direction:
+
+- Add typed RNG, KDF, and AEAD APIs
+- Add misuse-resistant diagnostics around key/nonce handling

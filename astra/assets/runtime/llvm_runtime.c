@@ -6,11 +6,15 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <unistd.h>
 #include <stdatomic.h>
 #if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include <windows.h>
+#include <io.h>
 #else
+#include <unistd.h>
 #include <pthread.h>
 #include <sched.h>
 #endif
@@ -1127,7 +1131,11 @@ _Bool astra_file_exists(uintptr_t path_ptr) {
   if (path == NULL) {
     return 0;
   }
+#if defined(_WIN32)
+  return _access(path, 0) == 0;
+#else
   return access(path, F_OK) == 0;
+#endif
 }
 
 uintptr_t astra_file_remove(uintptr_t path_ptr) {
@@ -1139,7 +1147,7 @@ uintptr_t astra_file_remove(uintptr_t path_ptr) {
 }
 
 typedef struct {
-  int fd;
+  uintptr_t fd;
   bool used;
 } SocketEntry;
 
@@ -1160,7 +1168,7 @@ static bool astra_socket_reserve(size_t want) {
     return false;
   }
   for (size_t i = g_sockets_cap; i < next; i++) {
-    p[i].fd = -1;
+    p[i].fd = 0;
     p[i].used = false;
   }
   g_sockets = p;
@@ -1168,13 +1176,29 @@ static bool astra_socket_reserve(size_t want) {
   return true;
 }
 
-static int astra_socket_fd(uintptr_t sid) {
+static uintptr_t astra_socket_fd(uintptr_t sid) {
   size_t idx = (size_t)sid;
   if (idx >= g_sockets_cap || !g_sockets[idx].used) {
-    return -1;
+    return 0;
   }
   return g_sockets[idx].fd;
 }
+
+#if defined(_WIN32)
+static bool astra_net_ready = false;
+
+static bool astra_socket_init(void) {
+  if (astra_net_ready) {
+    return true;
+  }
+  WSADATA wsa;
+  if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
+    return false;
+  }
+  astra_net_ready = true;
+  return true;
+}
+#endif
 
 static char *astra_dup_slice(const char *src, size_t n) {
   char *out = (char *)malloc(n + 1);
@@ -1234,8 +1258,60 @@ static bool astra_split_host_port(const char *addr, char **host_out, char **port
 
 uintptr_t astra_tcp_connect(uintptr_t addr_ptr) {
 #if defined(_WIN32)
-  (void)addr_ptr;
-  return (uintptr_t)-1;
+  const char *addr = (const char *)addr_ptr;
+  char *host = NULL;
+  char *port = NULL;
+  if (!astra_split_host_port(addr, &host, &port)) {
+    return (uintptr_t)-1;
+  }
+  if (!astra_socket_init()) {
+    free(host);
+    free(port);
+    return (uintptr_t)-1;
+  }
+
+  struct addrinfo hints;
+  memset(&hints, 0, sizeof(hints));
+  hints.ai_family = AF_UNSPEC;
+  hints.ai_socktype = SOCK_STREAM;
+
+  struct addrinfo *res = NULL;
+  int gai = getaddrinfo(host, port, &hints, &res);
+  free(host);
+  free(port);
+  if (gai != 0 || res == NULL) {
+    if (res != NULL) {
+      freeaddrinfo(res);
+    }
+    return (uintptr_t)-1;
+  }
+
+  SOCKET fd = INVALID_SOCKET;
+  for (struct addrinfo *it = res; it != NULL; it = it->ai_next) {
+    fd = socket(it->ai_family, it->ai_socktype, it->ai_protocol);
+    if (fd == INVALID_SOCKET) {
+      continue;
+    }
+    if (connect(fd, it->ai_addr, (int)it->ai_addrlen) == 0) {
+      break;
+    }
+    closesocket(fd);
+    fd = INVALID_SOCKET;
+  }
+  freeaddrinfo(res);
+  if (fd == INVALID_SOCKET) {
+    return (uintptr_t)-1;
+  }
+
+  uintptr_t sid = g_next_sid++;
+  size_t idx = (size_t)sid;
+  if (!astra_socket_reserve(idx + 1)) {
+    closesocket(fd);
+    return (uintptr_t)-1;
+  }
+  g_sockets[idx].fd = (uintptr_t)fd;
+  g_sockets[idx].used = true;
+  return sid;
 #else
   const char *addr = (const char *)addr_ptr;
   char *host = NULL;
@@ -1283,7 +1359,7 @@ uintptr_t astra_tcp_connect(uintptr_t addr_ptr) {
     close(fd);
     return (uintptr_t)-1;
   }
-  g_sockets[idx].fd = fd;
+  g_sockets[idx].fd = (uintptr_t)fd;
   g_sockets[idx].used = true;
   return sid;
 #endif
@@ -1291,11 +1367,22 @@ uintptr_t astra_tcp_connect(uintptr_t addr_ptr) {
 
 uintptr_t astra_tcp_send(uintptr_t sid, uintptr_t data_ptr) {
 #if defined(_WIN32)
-  (void)sid;
-  (void)data_ptr;
-  return (uintptr_t)-1;
+  SOCKET fd = (SOCKET)astra_socket_fd(sid);
+  const char *data = (const char *)data_ptr;
+  if (fd == INVALID_SOCKET || data == NULL) {
+    return (uintptr_t)-1;
+  }
+  size_t len = strlen(data);
+  if (len == 0) {
+    return 0;
+  }
+  int sent = send(fd, data, (int)len, 0);
+  if (sent == SOCKET_ERROR) {
+    return (uintptr_t)-1;
+  }
+  return (uintptr_t)sent;
 #else
-  int fd = astra_socket_fd(sid);
+  int fd = (int)astra_socket_fd(sid);
   const char *data = (const char *)data_ptr;
   if (fd < 0 || data == NULL) {
     return (uintptr_t)-1;
@@ -1314,11 +1401,27 @@ uintptr_t astra_tcp_send(uintptr_t sid, uintptr_t data_ptr) {
 
 uintptr_t astra_tcp_recv(uintptr_t sid, uintptr_t n) {
 #if defined(_WIN32)
-  (void)sid;
-  (void)n;
-  return (uintptr_t)astra_strdup_s("");
+  SOCKET fd = (SOCKET)astra_socket_fd(sid);
+  if (fd == INVALID_SOCKET) {
+    return (uintptr_t)astra_strdup_s("");
+  }
+  size_t want = (size_t)n;
+  if (want == 0) {
+    want = 1;
+  }
+  char *buf = (char *)astra_heap_alloc(want + 1);
+  if (buf == NULL) {
+    return (uintptr_t)astra_strdup_s("");
+  }
+  int got = recv(fd, buf, (int)want, 0);
+  if (got <= 0) {
+    buf[0] = '\0';
+    return (uintptr_t)buf;
+  }
+  buf[(size_t)got] = '\0';
+  return (uintptr_t)buf;
 #else
-  int fd = astra_socket_fd(sid);
+  int fd = (int)astra_socket_fd(sid);
   if (fd < 0) {
     return (uintptr_t)astra_strdup_s("");
   }
@@ -1342,15 +1445,24 @@ uintptr_t astra_tcp_recv(uintptr_t sid, uintptr_t n) {
 
 uintptr_t astra_tcp_close(uintptr_t sid) {
 #if defined(_WIN32)
-  (void)sid;
-  return 0;
+  size_t idx = (size_t)sid;
+  if (idx >= g_sockets_cap || !g_sockets[idx].used) {
+    return 0;
+  }
+  SOCKET fd = (SOCKET)g_sockets[idx].fd;
+  g_sockets[idx].fd = 0;
+  g_sockets[idx].used = false;
+  if (fd == INVALID_SOCKET) {
+    return 0;
+  }
+  return closesocket(fd) == 0 ? 0 : (uintptr_t)-1;
 #else
   size_t idx = (size_t)sid;
   if (idx >= g_sockets_cap || !g_sockets[idx].used) {
     return 0;
   }
-  int fd = g_sockets[idx].fd;
-  g_sockets[idx].fd = -1;
+  int fd = (int)g_sockets[idx].fd;
+  g_sockets[idx].fd = 0;
   g_sockets[idx].used = false;
   if (fd < 0) {
     return 0;
@@ -1931,9 +2043,15 @@ uintptr_t astra_env_get(uintptr_t key_ptr) {
 
 uintptr_t astra_cwd(void) {
   char buf[4096];
+#if defined(_WIN32)
+  if (_getcwd(buf, (int)sizeof(buf)) == NULL) {
+    return (uintptr_t)astra_strdup_s("");
+  }
+#else
   if (getcwd(buf, sizeof(buf)) == NULL) {
     return (uintptr_t)astra_strdup_s("");
   }
+#endif
   return (uintptr_t)astra_strdup_s(buf);
 }
 
@@ -1964,6 +2082,9 @@ uintptr_t astra_now_unix(void) {
 }
 
 uintptr_t astra_monotonic_ms(void) {
+#if defined(_WIN32)
+  return (uintptr_t)GetTickCount64();
+#else
   struct timespec ts;
 #if defined(CLOCK_MONOTONIC)
   if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) {
@@ -1976,9 +2097,15 @@ uintptr_t astra_monotonic_ms(void) {
 #endif
   uint64_t ms = (uint64_t)ts.tv_sec * 1000ULL + (uint64_t)(ts.tv_nsec / 1000000ULL);
   return (uintptr_t)ms;
+#endif
 }
 
 uintptr_t astra_sleep_ms(uintptr_t ms) {
+#if defined(_WIN32)
+  DWORD wait_ms = (DWORD)((uint64_t)ms > (uint64_t)0xFFFFFFFFULL ? 0xFFFFFFFFUL : (DWORD)ms);
+  Sleep(wait_ms);
+  return 0;
+#else
   struct timespec ts;
   uint64_t v = (uint64_t)ms;
   ts.tv_sec = (time_t)(v / 1000ULL);
@@ -1986,6 +2113,7 @@ uintptr_t astra_sleep_ms(uintptr_t ms) {
   while (nanosleep(&ts, &ts) != 0 && errno == EINTR) {
   }
   return 0;
+#endif
 }
 
 i128 astra_i128_mul_wrap(i128 a, i128 b) {

@@ -72,6 +72,12 @@ class _Evaluator:
             "proc_exit",
             "env_get",
             "cwd",
+            "now_unix",
+            "monotonic_ms",
+            "sleep_ms",
+            "__now_unix",
+            "__monotonic_ms",
+            "__sleep_ms",
         }
 
     def _tick(self, node):
@@ -257,7 +263,7 @@ class _Evaluator:
         if isinstance(e, AwaitExpr):
             return self.eval_expr(e.expr, env, env_types)
         if isinstance(e, TryExpr):
-            raise ComptimeError(_diag(self.filename, e.line, e.col, "`?` is not supported in comptime expressions"))
+            raise ComptimeError(_diag(self.filename, e.line, e.col, "`!` is not supported in comptime expressions"))
         if isinstance(e, Call):
             args = [self.eval_expr(a, env, env_types) for a in e.args]
             name = self._call_target_name(e.fn, env, env_types, e)

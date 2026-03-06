@@ -570,6 +570,78 @@ fn main() Int{
         assert "missing variants: A" in str(e)
 
 
+def test_match_structural_bool_payload_patterns_can_be_exhaustive():
+    src = """
+struct Flag {
+  v Bool,
+}
+enum Outer {
+  A(Flag),
+  B,
+}
+fn main() Int{
+  x: Outer = Outer.A(Flag(true));
+  match x {
+    Outer.A(Flag(true)) => { return 1; }
+    Outer.A(Flag(false)) => { return 2; }
+    Outer.B => { return 0; }
+  }
+  return 0;
+}
+"""
+    analyze(parse(src))
+
+
+def test_match_structural_bool_payload_duplicate_coverage_rejected():
+    src = """
+struct Flag {
+  v Bool,
+}
+enum Outer {
+  A(Flag),
+}
+fn main() Int{
+  x: Outer = Outer.A(Flag(true));
+  match x {
+    Outer.A(Flag(true)) => { return 1; }
+    Outer.A(Flag(true)) => { return 2; }
+    Outer.A(Flag(false)) => { return 3; }
+  }
+  return 0;
+}
+"""
+    try:
+        analyze(parse(src))
+        assert False
+    except SemanticError as e:
+        assert "duplicate enum payload match arm for Outer.A" in str(e)
+
+
+def test_match_structural_bool_payload_missing_combo_reports_detail():
+    src = """
+struct Flag {
+  v Bool,
+}
+enum Outer {
+  A(Flag),
+}
+fn main() Int{
+  x: Outer = Outer.A(Flag(true));
+  match x {
+    Outer.A(Flag(true)) => { return 1; }
+  }
+  return 0;
+}
+"""
+    try:
+        analyze(parse(src))
+        assert False
+    except SemanticError as e:
+        assert "non-exhaustive match for enum Outer" in str(e)
+        assert "payload combinations missing" in str(e)
+        assert "false" in str(e)
+
+
 def test_match_guarded_bool_arms_do_not_count_for_exhaustiveness():
     src = """
 fn main() Int{
@@ -602,6 +674,65 @@ def test_match_wildcard_cannot_be_combined_with_or_pattern():
         assert "wildcard pattern `_` cannot be combined with `|` alternatives" in str(e)
 
 
+def test_match_struct_destructuring_binds_fields():
+    src = """
+struct Pair {
+  a Int,
+  b Int,
+}
+fn main() Int{
+  p = Pair(4, 5);
+  match p {
+    Pair(x, y) => { return x + y; }
+  }
+  return 0;
+}
+"""
+    analyze(parse(src))
+
+
+def test_match_struct_destructuring_rejects_wrong_arity():
+    src = """
+struct Pair {
+  a Int,
+  b Int,
+}
+fn main() Int{
+  p = Pair(4, 5);
+  match p {
+    Pair(x) => { return x; }
+  }
+  return 0;
+}
+"""
+    try:
+        analyze(parse(src))
+        assert False
+    except SemanticError as e:
+        assert "Pair pattern expects 2 args, got 1" in str(e)
+
+
+def test_match_nested_enum_payload_destructuring_binds_inner_value():
+    src = """
+enum Maybe {
+  Some(Int),
+  None,
+}
+enum Outer {
+  Wrap(Maybe),
+}
+fn main() Int{
+  v: Outer = Outer.Wrap(Maybe.Some(9));
+  match v {
+    Outer.Wrap(Maybe.Some(x)) => { return x; }
+    Outer.Wrap(Maybe.None) => { return 0; }
+  }
+  return 0;
+}
+"""
+    analyze(parse(src))
+
+
 def test_specialization_prefers_concrete_impl():
     src = """
 fn sum(x T) T{ return x; }
@@ -625,6 +756,7 @@ fn main() Int{ return pick(1); }
         assert False
     except SemanticError as e:
         assert "overlapping overloads for pick are ambiguous" in str(e)
+        assert "for (Int)" in str(e)
 
 
 def test_where_clause_trait_bound_allows_matching_impl():
@@ -654,6 +786,7 @@ fn main() Int{ return wrap(1.5); }
     except SemanticError as e:
         assert "trait bound check failed for wrap(Float)" in str(e)
         assert "missing show(Float) String" in str(e)
+        assert "candidate `wrap(T) T where T: Show`" in str(e)
 
 
 def test_where_clause_trait_bound_reports_missing_contract_method_shape():
@@ -671,6 +804,7 @@ fn main() Int{ return wrap(1); }
     except SemanticError as e:
         assert "trait bound check failed for wrap(Int)" in str(e)
         assert "missing show(Int) String" in str(e)
+        assert "candidate `wrap(T) T where T: Show`" in str(e)
 
 
 def test_where_clause_rejects_unknown_trait():
@@ -1062,6 +1196,7 @@ def test_ref_return_must_tie_to_ref_param():
         assert False
     except SemanticError as e:
         assert "returned reference is not tied to an input reference parameter" in str(e)
+        assert "returned `r` currently borrows `x`" in str(e)
 
 
 def test_ref_return_alias_of_ref_param_is_allowed():
@@ -1076,6 +1211,7 @@ def test_inner_scope_reference_cannot_escape_via_outer_binding_if():
         assert False
     except SemanticError as e:
         assert "reference p cannot outlive borrowed value y" in str(e)
+        assert "owner scope depth" in str(e)
 
 
 def test_inner_scope_reference_cannot_escape_via_outer_binding_while():

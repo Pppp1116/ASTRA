@@ -33,3 +33,8 @@ Current limits:
 - Values are `Any`-typed at API boundary
 - No iterator traits or generic container abstractions
 - No advanced containers (`BTreeMap`, `Deque`, `Set`, priority queue)
+
+Near-term direction:
+
+- Add typed `List<T>`/`Map<K, V>` style APIs with semantic type-check coverage
+- Introduce iterator-oriented helpers once typed containers land

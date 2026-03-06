@@ -51,3 +51,11 @@ Stable diagnostics are emitted by `astra check` and `astra check --json`.
 - Diagnostics are normalized in `astra/check.py`.
 - Human output and JSON output use the same underlying diagnostics.
 - LSP diagnostics reuse these codes and can expose quick fixes when a suggestion has an edit.
+
+## Planned Diagnostic Expansion
+
+Near-term diagnostics work is centered on:
+
+- Trait coherence violations and generic resolution failures, including clearer candidate/bound mismatch notes.
+- Pattern matching exhaustiveness and redundancy in deeper structural/nested forms.
+- Lifetime/region reasoning notes that make borrow origin and outlives failures easier to trace.
