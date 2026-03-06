@@ -46,6 +46,17 @@ def lint_semantic(src: str, filename: str):
         return [(0, str(e))]
 
 
+def _collect_targets(path: str) -> list[Path]:
+    target = Path(path)
+    if target.is_file():
+        return [target]
+    if target.is_dir():
+        files = [p for p in target.rglob("*.astra") if p.is_file()]
+        files.sort(key=lambda p: p.as_posix())
+        return files
+    raise FileNotFoundError(path)
+
+
 def main(argv=None):
     """CLI-style entrypoint for this module.
     
@@ -56,24 +67,29 @@ def main(argv=None):
         Value produced by the routine, if any.
     """
     p = argparse.ArgumentParser()
-    p.add_argument("file")
+    p.add_argument("path")
     p.add_argument("--json", action="store_true")
     p.add_argument("--no-semantic", action="store_true")
     ns = p.parse_args(argv)
-    src = Path(ns.file).read_text()
-    errs = lint_text(src)
-    if not ns.no_semantic and ns.file.endswith(".astra"):
-        errs.extend(lint_semantic(src, ns.file))
+    targets = _collect_targets(ns.path)
+    errs: list[tuple[str, int, str]] = []
+    for fp in targets:
+        src = fp.read_text()
+        text_errs = lint_text(src)
+        errs.extend((str(fp), ln, msg) for ln, msg in text_errs)
+        if not ns.no_semantic and fp.suffix == ".astra":
+            sem_errs = lint_semantic(src, str(fp))
+            errs.extend((str(fp), ln, msg) for ln, msg in sem_errs)
     if errs:
         if ns.json:
-            out = [{"line": ln, "message": msg} for ln, msg in errs]
+            out = [{"file": file, "line": ln, "message": msg} for file, ln, msg in errs]
             print(json.dumps(out, indent=2))
         else:
-            for ln, msg in errs:
+            for file, ln, msg in errs:
                 if ln > 0:
-                    print(f"{ns.file}:{ln}: {msg}")
+                    print(f"{file}:{ln}: {msg}")
                 else:
-                    print(msg)
+                    print(f"{file}: {msg}")
         raise SystemExit(1)
     print("clean")
 

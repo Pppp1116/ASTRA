@@ -12,6 +12,19 @@ from astra.docgen import main as doc_main
 from astra.formatter import fmt, resolve_format_config
 
 
+def _discover_astra_files(root: Path) -> list[Path]:
+    """Discover Astra source files under a root path, skipping tool/cache dirs."""
+    skip_dirs = {".git", ".venv", "__pycache__", ".pytest_cache", ".mypy_cache", "build", ".astra-build"}
+    out: list[Path] = []
+    for p in root.rglob("*.astra"):
+        if any(part in skip_dirs for part in p.parts):
+            continue
+        if p.is_file():
+            out.append(p)
+    out.sort(key=lambda x: x.as_posix())
+    return out
+
+
 def cmd_build(a):
     """Handle the `astra build` subcommand.
     
@@ -135,14 +148,19 @@ def cmd_fmt(a):
     Returns:
         None. May raise `SystemExit` for CLI exit handling.
     """
+    targets: list[Path]
+    if a.files:
+        targets = [Path(path) for path in a.files]
+    else:
+        targets = _discover_astra_files(Path.cwd())
+
     bad: list[str] = []
-    for path in a.files:
-        fp = Path(path)
+    for fp in targets:
         src = fp.read_text()
         out = fmt(src, config=resolve_format_config(fp))
         if a.check:
             if out != src:
-                bad.append(path)
+                bad.append(str(fp))
             continue
         fp.write_text(out)
     if a.check:
@@ -231,7 +249,7 @@ def main(argv=None):
     t.set_defaults(func=cmd_test)
 
     f = sp.add_parser("fmt")
-    f.add_argument("files", nargs="+")
+    f.add_argument("files", nargs="*")
     f.add_argument("--check", action="store_true")
     f.set_defaults(func=cmd_fmt)
 

@@ -386,6 +386,7 @@ fn main() Int{
         assert False
     except SemanticError as e:
         assert "non-exhaustive match for enum Color" in str(e)
+        assert "missing variants: Blue" in str(e)
 
 
 def test_match_duplicate_enum_variant_is_rejected():
@@ -409,6 +410,164 @@ fn main() Int{
         assert False
     except SemanticError as e:
         assert "duplicate enum match arm for Color.Red" in str(e)
+
+
+def test_match_enum_payload_binding_is_available_in_arm_scope():
+    src = """
+enum E {
+  A(Int),
+  B,
+}
+fn main() Int{
+  v: E = E.A(7);
+  match v {
+    E.A(x) => { return x; }
+    E.B => { return 0; }
+  }
+  return 0;
+}
+"""
+    analyze(parse(src))
+
+
+def test_match_enum_payload_constrained_pattern_not_exhaustive():
+    src = """
+enum E {
+  A(Int),
+  B,
+}
+fn main() Int{
+  v: E = E.A(1);
+  match v {
+    E.A(1) => { return 1; }
+    E.B => { return 0; }
+  }
+  return 0;
+}
+"""
+    try:
+        analyze(parse(src))
+        assert False
+    except SemanticError as e:
+        assert "non-exhaustive match for enum E" in str(e)
+
+
+def test_match_enum_payload_wildcard_counts_as_full_variant_coverage():
+    src = """
+enum E {
+  A(Int),
+  B,
+}
+fn main() Int{
+  v: E = E.A(1);
+  match v {
+    E.A(_) => { return 1; }
+    E.B => { return 0; }
+  }
+  return 0;
+}
+"""
+    analyze(parse(src))
+
+
+def test_match_nested_enum_payload_patterns_can_be_exhaustive():
+    src = """
+enum Inner {
+  X,
+  Y,
+}
+enum Outer {
+  A(Inner),
+  B,
+}
+fn main() Int{
+  v: Outer = Outer.A(Inner.X);
+  match v {
+    Outer.A(Inner.X) => { return 1; }
+    Outer.A(Inner.Y) => { return 2; }
+    Outer.B => { return 0; }
+  }
+  return 0;
+}
+"""
+    analyze(parse(src))
+
+
+def test_match_nested_enum_payload_duplicate_coverage_rejected():
+    src = """
+enum Inner {
+  X,
+  Y,
+}
+enum Outer {
+  A(Inner),
+}
+fn main() Int{
+  v: Outer = Outer.A(Inner.X);
+  match v {
+    Outer.A(Inner.X) => { return 1; }
+    Outer.A(Inner.X) => { return 2; }
+  }
+  return 0;
+}
+"""
+    try:
+        analyze(parse(src))
+        assert False
+    except SemanticError as e:
+        assert "duplicate enum payload match arm for Outer.A" in str(e)
+
+
+def test_match_multi_payload_nested_enum_patterns_can_be_exhaustive():
+    src = """
+enum Inner {
+  X,
+  Y,
+}
+enum Outer {
+  A(Inner, Inner),
+  B,
+}
+fn main() Int{
+  v: Outer = Outer.A(Inner.X, Inner.Y);
+  match v {
+    Outer.A(Inner.X, Inner.X) => { return 1; }
+    Outer.A(Inner.X, Inner.Y) => { return 2; }
+    Outer.A(Inner.Y, Inner.X) => { return 3; }
+    Outer.A(Inner.Y, Inner.Y) => { return 4; }
+    Outer.B => { return 0; }
+  }
+  return 0;
+}
+"""
+    analyze(parse(src))
+
+
+def test_match_multi_payload_nested_enum_patterns_detect_missing_combo():
+    src = """
+enum Inner {
+  X,
+  Y,
+}
+enum Outer {
+  A(Inner, Inner),
+}
+fn main() Int{
+  v: Outer = Outer.A(Inner.X, Inner.Y);
+  match v {
+    Outer.A(Inner.X, Inner.X) => { return 1; }
+    Outer.A(Inner.X, Inner.Y) => { return 2; }
+    Outer.A(Inner.Y, Inner.X) => { return 3; }
+  }
+  return 0;
+}
+"""
+    try:
+        analyze(parse(src))
+        assert False
+    except SemanticError as e:
+        assert "non-exhaustive match for enum Outer" in str(e)
+        assert "missing variants: A" in str(e)
 
 
 def test_match_guarded_bool_arms_do_not_count_for_exhaustiveness():
@@ -465,7 +624,7 @@ fn main() Int{ return pick(1); }
         analyze(parse(src))
         assert False
     except SemanticError as e:
-        assert "ambiguous overload" in str(e)
+        assert "overlapping overloads for pick are ambiguous" in str(e)
 
 
 def test_where_clause_trait_bound_allows_matching_impl():
@@ -493,7 +652,25 @@ fn main() Int{ return wrap(1.5); }
         analyze(parse(src))
         assert False
     except SemanticError as e:
-        assert "no matching overload for wrap(Float)" in str(e)
+        assert "trait bound check failed for wrap(Float)" in str(e)
+        assert "missing show(Float) String" in str(e)
+
+
+def test_where_clause_trait_bound_reports_missing_contract_method_shape():
+    src = """
+trait Show {
+  fn show(x Self) String;
+}
+fn show(x Int) Int { return x; }
+fn wrap(x T) T where T: Show{ return x; }
+fn main() Int{ return wrap(1); }
+"""
+    try:
+        analyze(parse(src))
+        assert False
+    except SemanticError as e:
+        assert "trait bound check failed for wrap(Int)" in str(e)
+        assert "missing show(Int) String" in str(e)
 
 
 def test_where_clause_rejects_unknown_trait():

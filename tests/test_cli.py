@@ -179,3 +179,32 @@ def test_cli_fmt_and_doc_subcommands(tmp_path: Path):
     rc_doc = subprocess.call([sys.executable, "-m", "astra.cli", "doc", str(src), "-o", str(out)])
     assert rc_doc == 0
     assert out.exists()
+
+
+def test_cli_fmt_check_without_files_discovers_workspace_astra_files(tmp_path: Path):
+    src = tmp_path / "a.astra"
+    src.write_text("fn main() Int{\nprint(1);\nreturn 0;\n}\n")
+    proc_bad = subprocess.run(
+        [sys.executable, "-m", "astra.cli", "fmt", "--check"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert proc_bad.returncode == 1
+    assert "not formatted:" in proc_bad.stderr
+
+    proc_fmt = subprocess.run(
+        [sys.executable, "-m", "astra.cli", "fmt"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert proc_fmt.returncode == 0
+
+    proc_ok = subprocess.run(
+        [sys.executable, "-m", "astra.cli", "fmt", "--check"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert proc_ok.returncode == 0

@@ -36,6 +36,18 @@ def test_linter_main_json_output(tmp_path: Path, capsys):
     assert "tab character not allowed" in out
 
 
+def test_linter_main_accepts_directory(tmp_path: Path, capsys):
+    src = tmp_path / "bad.astra"
+    src.write_text("fn main() Int{\treturn 0;\n}\n")
+    try:
+        astra.linter.main([str(tmp_path), "--json", "--no-semantic"])
+        assert False
+    except SystemExit as e:
+        assert e.code == 1
+    out = capsys.readouterr().out
+    assert "tab character not allowed" in out
+
+
 def test_pkg_main_roundtrip(tmp_path: Path):
     prev = Path.cwd()
     try:

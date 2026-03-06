@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 from pathlib import Path
+from itertools import product
 
 from astra.ast import *
 from astra.int_types import is_int_type_name, parse_int_type_name
@@ -1098,15 +1099,20 @@ def _replace_self_type(typ: str, concrete: str) -> str:
 
 
 def _trait_satisfied_by_type(trait_name: str, concrete: str) -> bool:
+    return len(_trait_missing_methods(trait_name, concrete)) == 0
+
+
+def _trait_missing_methods(trait_name: str, concrete: str) -> list[str]:
     concrete_c = _canonical_type(concrete)
     explicit = _current_trait_impls()
     if concrete_c in explicit.get(trait_name, set()):
-        return True
+        return []
     traits = _current_traits()
     fn_groups = _current_fn_groups()
     decl = traits.get(trait_name)
     if decl is None:
-        return False
+        return [f"unknown trait {trait_name}"]
+    missing: list[str] = []
     for mname, params, ret in decl.methods:
         target_params = [(n, _replace_self_type(t, concrete_c)) for n, t in params]
         target_ret = _replace_self_type(ret, concrete_c)
@@ -1125,15 +1131,16 @@ def _trait_satisfied_by_type(trait_name: str, concrete: str) -> bool:
             matched = True
             break
         if not matched:
-            return False
-    return True
+            sig = f"{mname}({', '.join(type_text(t) for _, t in target_params)}) {target_ret}"
+            missing.append(sig)
+    return missing
 
 
-def _specialization_score(
+def _match_decl_bindings(
     decl: FnDecl | ExternFnDecl,
     arg_types: list[str],
     known_types: set[str],
-) -> tuple[int, int, int, int] | None:
+) -> tuple[int, int, int, dict[str, str]] | None:
     is_variadic = bool(getattr(decl, "is_variadic", False))
     if is_variadic:
         if len(arg_types) < len(decl.params):
@@ -1180,6 +1187,18 @@ def _specialization_score(
         constrained += 1
         if pty == aty:
             exact += 1
+    return (exact, constrained, wildcards, bindings)
+
+
+def _specialization_score(
+    decl: FnDecl | ExternFnDecl,
+    arg_types: list[str],
+    known_types: set[str],
+) -> tuple[int, int, int, int] | None:
+    matched = _match_decl_bindings(decl, arg_types, known_types)
+    if matched is None:
+        return None
+    exact, constrained, wildcards, bindings = matched
     where_bounds = list(getattr(decl, "where_bounds", []))
     if where_bounds:
         for tvar, trait_name in where_bounds:
@@ -1189,6 +1208,106 @@ def _specialization_score(
             if not _trait_satisfied_by_type(trait_name, concrete):
                 return None
     return (exact, constrained, -wildcards, 0)
+
+
+def _decl_signature_text(decl: FnDecl | ExternFnDecl) -> str:
+    params = ", ".join(type_text(t) for _, t in decl.params)
+    where = ""
+    bounds = list(getattr(decl, "where_bounds", []))
+    if bounds:
+        where = " where " + ", ".join(f"{tv}: {tr}" for tv, tr in bounds)
+    return f"{decl.name}({params}) {type_text(decl.ret)}{where}"
+
+
+def _decl_more_specific(a: FnDecl | ExternFnDecl, b: FnDecl | ExternFnDecl, known_types: set[str]) -> bool:
+    if len(a.params) != len(b.params):
+        return False
+    a_typevars = set(getattr(a, "generics", []))
+    b_typevars = set(getattr(b, "generics", []))
+    for _, pty in a.params:
+        if _is_typevar(pty, known_types):
+            a_typevars.add(pty)
+    for _, pty in b.params:
+        if _is_typevar(pty, known_types):
+            b_typevars.add(pty)
+
+    strictly_more = False
+    for i, ((_, ap), (_, bp)) in enumerate(zip(a.params, b.params)):
+        ap_c = _canonical_type(ap)
+        bp_c = _canonical_type(bp)
+        a_wild = ap_c == "Any" or ap_c in a_typevars
+        b_wild = bp_c == "Any" or bp_c in b_typevars
+
+        if i == 0 and _is_ref_type(ap_c):
+            inner = _strip_ref(ap_c)
+            if inner in a_typevars:
+                a_wild = True
+        if i == 0 and _is_ref_type(bp_c):
+            inner = _strip_ref(bp_c)
+            if inner in b_typevars:
+                b_wild = True
+
+        if a_wild and not b_wild:
+            return False
+        if not a_wild and b_wild:
+            strictly_more = True
+            continue
+        if not a_wild and not b_wild and not _same_type(ap_c, bp_c):
+            return False
+
+    a_bounds = set(getattr(a, "where_bounds", []))
+    b_bounds = set(getattr(b, "where_bounds", []))
+    if a_bounds < b_bounds:
+        return False
+    if a_bounds > b_bounds:
+        strictly_more = True
+    return strictly_more
+
+
+def _decls_overlap(a: FnDecl | ExternFnDecl, b: FnDecl | ExternFnDecl, known_types: set[str]) -> bool:
+    if bool(getattr(a, "is_variadic", False)) or bool(getattr(b, "is_variadic", False)):
+        return False
+    if len(a.params) != len(b.params):
+        return False
+    probes: list[str] = []
+    a_typevars = set(getattr(a, "generics", []))
+    b_typevars = set(getattr(b, "generics", []))
+    for _, pty in a.params:
+        if _is_typevar(pty, known_types):
+            a_typevars.add(pty)
+    for _, pty in b.params:
+        if _is_typevar(pty, known_types):
+            b_typevars.add(pty)
+
+    for i, ((_, ap), (_, bp)) in enumerate(zip(a.params, b.params)):
+        ap_c = _canonical_type(ap)
+        bp_c = _canonical_type(bp)
+        a_wild = ap_c == "Any" or ap_c in a_typevars
+        b_wild = bp_c == "Any" or bp_c in b_typevars
+        if i == 0 and _is_ref_type(ap_c) and _strip_ref(ap_c) in a_typevars:
+            a_wild = True
+        if i == 0 and _is_ref_type(bp_c) and _strip_ref(bp_c) in b_typevars:
+            b_wild = True
+        if a_wild and b_wild:
+            probes.append("Int")
+            continue
+        if a_wild and not b_wild:
+            probes.append(_strip_ref(bp_c) if i == 0 and _is_ref_type(bp_c) else bp_c)
+            continue
+        if b_wild and not a_wild:
+            probes.append(_strip_ref(ap_c) if i == 0 and _is_ref_type(ap_c) else ap_c)
+            continue
+        if _same_type(ap_c, bp_c):
+            probes.append(_strip_ref(ap_c) if i == 0 and _is_ref_type(ap_c) else ap_c)
+            continue
+        if i == 0 and _is_ref_type(ap_c) and _same_type(_strip_ref(ap_c), bp_c):
+            probes.append(bp_c)
+            continue
+        if i == 0 and _is_ref_type(bp_c) and _same_type(_strip_ref(bp_c), ap_c):
+            probes.append(ap_c)
+            continue
+        return False
+    return _match_decl_bindings(a, probes, known_types) is not None and _match_decl_bindings(b, probes, known_types) is not None
 
 
 def _choose_impl(
@@ -1206,6 +1325,31 @@ def _choose_impl(
         if sc is not None:
             ranked.append((sc, d))
     if not ranked:
+        where_misses: list[str] = []
+        for d in decls:
+            matched = _match_decl_bindings(d, arg_types, known_types)
+            if matched is None:
+                continue
+            _, _, _, bindings = matched
+            for tvar, trait_name in list(getattr(d, "where_bounds", [])):
+                concrete = bindings.get(tvar)
+                if concrete is None:
+                    continue
+                missing = _trait_missing_methods(trait_name, concrete)
+                if not missing:
+                    continue
+                where_misses.append(
+                    f"{tvar}: {trait_name} not satisfied for {concrete}; missing {', '.join(missing)}"
+                )
+        if where_misses:
+            raise SemanticError(
+                _diag(
+                    filename,
+                    line,
+                    col,
+                    f"trait bound check failed for {name}({', '.join(arg_types)}): {where_misses[0]}",
+                )
+            )
         raise SemanticError(_diag(filename, line, col, f"no matching overload for {name}({', '.join(arg_types)})"))
     ranked.sort(key=lambda x: x[0], reverse=True)
     best_score = ranked[0][0]
@@ -1443,6 +1587,26 @@ def analyze(
                             )
                         )
 
+        known_types = set(PRIMITIVES) | set(structs.keys()) | set(enums.keys())
+        for name, decls in fn_groups.items():
+            fn_decls = [d for d in decls if isinstance(d, FnDecl) and not bool(getattr(d, "is_variadic", False))]
+            for i, a in enumerate(fn_decls):
+                for b in fn_decls[i + 1 :]:
+                    if not _decls_overlap(a, b, known_types):
+                        continue
+                    if _decl_more_specific(a, b, known_types) or _decl_more_specific(b, a, known_types):
+                        continue
+                    _record(
+                        SemanticError(
+                            _diag(
+                                getattr(a, "_source_filename", filename),
+                                a.line,
+                                a.col,
+                                f"overlapping overloads for {name} are ambiguous: `{_decl_signature_text(a)}` vs `{_decl_signature_text(b)}`",
+                            )
+                        )
+                    )
+
         prog.ffi_libs = set(sorted(ffi_libs))
 
         for name, decls in fn_groups.items():
@@ -1648,6 +1812,83 @@ def _enum_variant_name_for_pattern(pat: Any, enum_name: str) -> str | None:
     ):
         return pat.fn.field
     return None
+
+
+def _enum_variant_payload_patterns_for_pattern(pat: Any, enum_name: str) -> list[Any] | None:
+    if isinstance(pat, FieldExpr) and isinstance(pat.obj, Name) and pat.obj.value == enum_name:
+        return []
+    if (
+        isinstance(pat, Call)
+        and isinstance(pat.fn, FieldExpr)
+        and isinstance(pat.fn.obj, Name)
+        and pat.fn.obj.value == enum_name
+    ):
+        return list(pat.args)
+    return None
+
+
+def _enum_decl_for_type(typ: str, enums: dict[str, EnumDecl]) -> EnumDecl | None:
+    c = _canonical_type(typ)
+    if c in enums:
+        return enums[c]
+    parsed = _parse_parametric_type(c)
+    if parsed is not None and parsed[0] in enums:
+        return enums[parsed[0]]
+    return None
+
+
+def _covered_enum_variants_by_pattern(pat: Any, enum_decl: EnumDecl, enums: dict[str, EnumDecl]) -> set[str] | None:
+    all_variants = {name for name, _ in enum_decl.variants}
+    if isinstance(pat, Name):
+        # `_` and any identifier binding are total for the expected enum type.
+        return set(all_variants)
+    if isinstance(pat, WildcardPattern):
+        return set(all_variants)
+    variant_name = _enum_variant_name_for_pattern(pat, enum_decl.name)
+    if variant_name is None:
+        return None
+    payload_types = next((vtypes for vname, vtypes in enum_decl.variants if vname == variant_name), None)
+    if payload_types is None:
+        return None
+    payload_pats = _enum_variant_payload_patterns_for_pattern(pat, enum_decl.name)
+    if payload_pats is None:
+        payload_pats = []
+    if len(payload_pats) != len(payload_types):
+        return None
+    for pnode, pty in zip(payload_pats, payload_types):
+        if isinstance(pnode, Name) or isinstance(pnode, WildcardPattern):
+            continue
+        inner_decl = _enum_decl_for_type(pty, enums)
+        if inner_decl is None:
+            return None
+        inner_cov = _covered_enum_variants_by_pattern(pnode, inner_decl, enums)
+        if inner_cov is None:
+            return None
+        if inner_cov != {name for name, _ in inner_decl.variants}:
+            return None
+    return {variant_name}
+
+
+def _variant_payload_coverage_keys(
+    payload_pats: list[Any],
+    payload_types: list[str],
+    enums: dict[str, EnumDecl],
+) -> tuple[set[tuple[str, ...]] | None, set[tuple[str, ...]] | None]:
+    enum_axes: list[tuple[set[str], set[str]]] = []
+    for pnode, pty in zip(payload_pats, payload_types):
+        inner_decl = _enum_decl_for_type(pty, enums)
+        if inner_decl is None:
+            continue
+        universe = {name for name, _ in inner_decl.variants}
+        cov = _covered_enum_variants_by_pattern(pnode, inner_decl, enums)
+        if cov is None:
+            return None, None
+        enum_axes.append((cov, universe))
+    if not enum_axes:
+        return set(), set()
+    cov_keys = {tuple(parts) for parts in product(*(sorted(c) for c, _ in enum_axes))}
+    full_keys = {tuple(parts) for parts in product(*(sorted(u) for _, u in enum_axes))}
+    return cov_keys, full_keys
 
 
 def _check_stmt(
@@ -2034,6 +2275,8 @@ def _check_stmt(
         subject_ty = _infer(st.expr, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok)
         seen_bool: set[bool] = set()
         seen_enum_variants: set[str] = set()
+        nested_enum_coverage: dict[str, set[tuple[str, ...]]] = {}
+        nested_enum_universe: dict[str, set[tuple[str, ...]]] = {}
         subject_enum_decl: EnumDecl | None = None
         subject_canon = _canonical_type(subject_ty)
         if subject_canon in enums:
@@ -2078,6 +2321,109 @@ def _check_stmt(
             for alt_pat in patterns:
                 if isinstance(alt_pat, WildcardPattern):
                     continue
+                handled_enum_pattern = False
+                if subject_enum_decl is not None:
+                    enum_name = subject_enum_decl.name
+                    variant_name = _enum_variant_name_for_pattern(alt_pat, enum_name)
+                    if variant_name is not None:
+                        handled_enum_pattern = True
+                if guard_expr is None and isinstance(alt_pat, BoolLit):
+                    if alt_pat.value in seen_bool:
+                        value_text = "true" if alt_pat.value else "false"
+                        raise SemanticError(_diag(filename, alt_pat.line, alt_pat.col, f"duplicate Bool match arm for {value_text}"))
+                    seen_bool.add(alt_pat.value)
+                if guard_expr is None and subject_enum_decl is not None:
+                    enum_name = subject_enum_decl.name
+                    variant_name = _enum_variant_name_for_pattern(alt_pat, enum_name)
+                    if variant_name is not None:
+                        known = {name for name, _ in subject_enum_decl.variants}
+                        if variant_name not in known:
+                            raise SemanticError(
+                                _diag(filename, alt_pat.line, alt_pat.col, f"unknown enum variant {enum_name}.{variant_name}")
+                            )
+                        payload_types = next(vtypes for vname, vtypes in subject_enum_decl.variants if vname == variant_name)
+                        payload_pats = _enum_variant_payload_patterns_for_pattern(alt_pat, enum_name)
+                        if payload_pats is None:
+                            payload_pats = []
+                        if len(payload_pats) != len(payload_types):
+                            raise SemanticError(
+                                _diag(
+                                    filename,
+                                    alt_pat.line,
+                                    alt_pat.col,
+                                    f"{enum_name}.{variant_name} pattern expects {len(payload_types)} args, got {len(payload_pats)}",
+                                )
+                            )
+                        variant_total = True
+                        bindings_for_arm: dict[str, str] = {}
+                        for pnode, pty in zip(payload_pats, payload_types):
+                            if isinstance(pnode, Name) and pnode.value == "_":
+                                continue
+                            if isinstance(pnode, Name):
+                                prev = bindings_for_arm.get(pnode.value)
+                                if prev is not None and not _same_type(prev, pty):
+                                    raise SemanticError(
+                                        _diag(
+                                            filename,
+                                            pnode.line,
+                                            pnode.col,
+                                            f"pattern binding {pnode.value} has conflicting types {prev} and {pty}",
+                                        )
+                                    )
+                                bindings_for_arm[pnode.value] = _canonical_type(pty)
+                                continue
+                            pnode_ty = _infer(
+                                pnode,
+                                scopes,
+                                mut_scopes,
+                                fn_groups,
+                                structs,
+                                enums,
+                                owned,
+                                borrow,
+                                move,
+                                filename,
+                                fn_name,
+                                unsafe_ok,
+                            )
+                            _require_type(filename, pnode.line, pnode.col, pty, pnode_ty, "enum payload pattern")
+                            variant_total = False
+                        if variant_total:
+                            if variant_name in seen_enum_variants:
+                                raise SemanticError(
+                                    _diag(filename, alt_pat.line, alt_pat.col, f"duplicate enum match arm for {enum_name}.{variant_name}")
+                                )
+                            seen_enum_variants.add(variant_name)
+                        else:
+                            cov_keys, full_keys = _variant_payload_coverage_keys(payload_pats, payload_types, enums)
+                            if cov_keys is not None and full_keys is not None and full_keys:
+                                nested_enum_universe.setdefault(variant_name, full_keys)
+                                current = nested_enum_coverage.setdefault(variant_name, set())
+                                if cov_keys.issubset(current):
+                                    raise SemanticError(
+                                        _diag(
+                                            filename,
+                                            alt_pat.line,
+                                            alt_pat.col,
+                                            f"duplicate enum payload match arm for {enum_name}.{variant_name}",
+                                        )
+                                    )
+                                current.update(cov_keys)
+                                if current == nested_enum_universe.get(variant_name, set()):
+                                    if variant_name in seen_enum_variants:
+                                        raise SemanticError(
+                                            _diag(
+                                                filename,
+                                                alt_pat.line,
+                                                alt_pat.col,
+                                                f"duplicate enum match arm for {enum_name}.{variant_name}",
+                                            )
+                                        )
+                                    seen_enum_variants.add(variant_name)
+                        setattr(alt_pat, "_pattern_bindings", bindings_for_arm)
+                        continue
+                if handled_enum_pattern:
+                    continue
                 pty = _infer(
                     alt_pat,
                     scopes,
@@ -2094,29 +2440,16 @@ def _check_stmt(
                 )
                 if subject_ty != "Any":
                     _require_type(filename, st.line, st.col, subject_ty, pty, "match pattern")
-                if guard_expr is None and isinstance(alt_pat, BoolLit):
-                    if alt_pat.value in seen_bool:
-                        value_text = "true" if alt_pat.value else "false"
-                        raise SemanticError(_diag(filename, alt_pat.line, alt_pat.col, f"duplicate Bool match arm for {value_text}"))
-                    seen_bool.add(alt_pat.value)
-                if guard_expr is None and subject_enum_decl is not None:
-                    enum_name = subject_enum_decl.name
-                    variant_name = _enum_variant_name_for_pattern(alt_pat, enum_name)
-                    if variant_name is not None:
-                        known = {name for name, _ in subject_enum_decl.variants}
-                        if variant_name not in known:
-                            raise SemanticError(
-                                _diag(filename, alt_pat.line, alt_pat.col, f"unknown enum variant {enum_name}.{variant_name}")
-                            )
-                        if variant_name in seen_enum_variants:
-                            raise SemanticError(
-                                _diag(filename, alt_pat.line, alt_pat.col, f"duplicate enum match arm for {enum_name}.{variant_name}")
-                            )
-                        seen_enum_variants.add(variant_name)
             arm_scopes = scopes + [{}]
             arm_mut_scopes = mut_scopes + [{}]
             arm_borrow_scopes = borrow_scopes + [set()]
             arm_move_scopes = move_scopes + [{}]
+            for alt_pat in patterns:
+                for bname, bty in getattr(alt_pat, "_pattern_bindings", {}).items():
+                    if bname in arm_scopes[-1]:
+                        raise SemanticError(_diag(filename, alt_pat.line, alt_pat.col, f"duplicate pattern binding {bname}"))
+                    arm_scopes[-1][bname] = bty
+                    arm_mut_scopes[-1][bname] = False
             _check_block(
                 body,
                 arm_scopes,
@@ -2141,7 +2474,15 @@ def _check_stmt(
         if subject_enum_decl is not None and not seen_wildcard:
             all_variants = {name for name, _ in subject_enum_decl.variants}
             if seen_enum_variants != all_variants:
-                raise SemanticError(_diag(filename, st.line, st.col, f"non-exhaustive match for enum {subject_enum_decl.name}"))
+                missing = ", ".join(sorted(all_variants - seen_enum_variants))
+                raise SemanticError(
+                    _diag(
+                        filename,
+                        st.line,
+                        st.col,
+                        f"non-exhaustive match for enum {subject_enum_decl.name}; missing variants: {missing}",
+                    )
+                )
         return
     if isinstance(st, ExprStmt):
         _infer(st.expr, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok)

@@ -102,6 +102,9 @@ _ENTRY_SIG_RE = re.compile(r"^(main|_start)\(\) (must not take parameters|must r
 _UNKNOWN_FIELD_RE = re.compile(r"\bunknown field ([A-Za-z_][A-Za-z0-9_]*)\b")
 _MISSING_FIELD_RE = re.compile(r"\bmissing field ([A-Za-z_][A-Za-z0-9_]*)\b")
 _EXPECTED_GOT_RE = re.compile(r"^expected (.+), got (.+)$")
+_NON_EXHAUSTIVE_ENUM_RE = re.compile(
+    r"^non-exhaustive match for enum ([A-Za-z_][A-Za-z0-9_]*)(?:;\s*missing variants:\s*(.+))?$"
+)
 
 # Cached source text used for richer snippet rendering in format_diagnostic().
 _SOURCE_CACHE: dict[str, str] = {}
@@ -545,8 +548,11 @@ def _friendly_message_for(message: str, code: str) -> str:
 
     if message.startswith("non-exhaustive match for Bool"):
         return "non-exhaustive `match` for `Bool`"
-    if message.startswith("non-exhaustive match for enum "):
-        enum_name = message.removeprefix("non-exhaustive match for enum ").strip()
+    non_exhaustive_enum = _NON_EXHAUSTIVE_ENUM_RE.match(message)
+    if non_exhaustive_enum is not None:
+        enum_name, missing_variants = non_exhaustive_enum.groups()
+        if missing_variants:
+            return f"non-exhaustive `match` for enum `{enum_name}` (missing: {missing_variants})"
         return f"non-exhaustive `match` for enum `{enum_name}`"
 
     no_impl = _NO_MATCHING_IMPL_RE.match(message)
