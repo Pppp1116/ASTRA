@@ -15,6 +15,137 @@ from astra.module_resolver import resolve_import_path
 from astra.parser import parse
 
 
+class DeadCodeAnalyzer:
+    """Analyzes AST for dead code and unreachable code patterns."""
+    
+    def __init__(self):
+        self.used_functions = set()
+        self.used_variables = set()
+        self.unreachable_blocks = []
+        self.dead_code_warnings = []
+    
+    def analyze_program(self, program, filename: str):
+        """Analyze entire program for dead code."""
+        self.used_functions.clear()
+        self.used_variables.clear()
+        self.unreachable_blocks.clear()
+        self.dead_code_warnings.clear()
+        
+        # First pass: find all declarations
+        self.declarations = self._collect_declarations(program)
+        
+        # Second pass: find usage patterns
+        self._analyze_usage(program)
+        
+        # Third pass: identify dead code
+        self._identify_dead_code(filename)
+        
+        return self.dead_code_warnings
+    
+    def _collect_declarations(self, program):
+        """Collect all function and variable declarations."""
+        declarations = {
+            'functions': {},
+            'variables': {},
+            'imports': {}
+        }
+        
+        for item in getattr(program, 'items', []):
+            if isinstance(item, FnDecl):
+                declarations['functions'][item.name] = item
+            elif isinstance(item, LetStmt):
+                declarations['variables'][item.name] = item
+            elif isinstance(item, ImportDecl):
+                alias = item.alias or item.module
+                declarations['imports'][alias] = item
+        
+        return declarations
+    
+    def _analyze_usage(self, program):
+        """Analyze usage of functions and variables."""
+        for item in getattr(program, 'items', []):
+            if isinstance(item, FnDecl):
+                self._analyze_function_usage(item)
+    
+    def _analyze_function_usage(self, fn_decl):
+        """Analyze usage within a function."""
+        # Mark main/entry points as used
+        if fn_decl.name in ['main', '_start']:
+            self.used_functions.add(fn_decl.name)
+        
+        # Walk through function body to find usage
+        self._walk_ast_node(fn_decl)
+    
+    def _walk_ast_node(self, node):
+        """Walk AST nodes to find usage patterns."""
+        if isinstance(node, Name):
+            # Check if this name refers to a function or variable
+            if node.value in self.declarations['functions']:
+                self.used_functions.add(node.value)
+            elif node.value in self.declarations['variables']:
+                self.used_variables.add(node.value)
+        
+        # Recursively walk child nodes
+        if hasattr(node, '__dataclass_fields__'):
+            for field_name in node.__dataclass_fields__:
+                field_value = getattr(node, field_name)
+                if isinstance(field_value, list):
+                    for item in field_value:
+                        self._walk_ast_node(item)
+                elif field_value is not None:
+                    self._walk_ast_node(field_value)
+    
+    def _identify_dead_code(self, filename: str):
+        """Identify dead code based on usage analysis."""
+        # Find unused functions (excluding common entry points)
+        entry_points = {'main', '_start', 'test', 'bench'}
+        for func_name, func_decl in self.declarations['functions'].items():
+            if (func_name not in self.used_functions and 
+                not func_name.startswith('_') and 
+                func_name not in entry_points):
+                
+                self.dead_code_warnings.append({
+                    'type': 'unused_function',
+                    'message': f"function `{func_name}` is never used",
+                    'filename': filename,
+                    'line': func_decl.line,
+                    'col': func_decl.col,
+                    'severity': 'warning'
+                })
+        
+        # Find unused variables
+        for var_name, var_decl in self.declarations['variables'].items():
+            if (var_name not in self.used_variables and 
+                not var_name.startswith('_')):
+                
+                self.dead_code_warnings.append({
+                    'type': 'unused_variable',
+                    'message': f"variable `{var_name}` is never used",
+                    'filename': filename,
+                    'line': var_decl.line,
+                    'col': var_decl.col,
+                    'severity': 'warning'
+                })
+        
+        # Find unused imports
+        for import_name, import_decl in self.declarations['imports'].items():
+            if import_name not in self.used_functions and import_name not in self.used_variables:
+                self.dead_code_warnings.append({
+                    'type': 'unused_import',
+                    'message': f"import `{import_name}` is never used",
+                    'filename': filename,
+                    'line': import_decl.line,
+                    'col': import_decl.col,
+                    'severity': 'info'
+                })
+    
+    def check_unreachable_code(self, stmt):
+        """Check for unreachable code after return/break/continue."""
+        if isinstance(stmt, (ReturnStmt, BreakStmt, ContinueStmt)):
+            return True  # Code after this is unreachable
+        return False
+
+
 class SemanticError(Exception):
     """Error type raised by the semantic subsystem.
     
@@ -2116,6 +2247,18 @@ def analyze(
             _TRAITS_STACK.pop()
             _TRAIT_IMPLS_STACK.pop()
             _KNOWN_TRAITS_STACK.pop()
+        
+        # Run dead code detection
+        dead_code_analyzer = DeadCodeAnalyzer()
+        dead_code_warnings = dead_code_analyzer.analyze_program(prog, filename)
+        
+        # Convert dead code warnings to semantic errors
+        for warning in dead_code_warnings:
+            if warning['severity'] == 'warning':
+                errors.append(f"{filename}:{warning['line']}:{warning['col']}: warning: {warning['message']}")
+            elif warning['severity'] == 'info':
+                errors.append(f"{filename}:{warning['line']}:{warning['col']}: info: {warning['message']}")
+        
         if errors:
             raise SemanticError("\n".join(errors))
     finally:

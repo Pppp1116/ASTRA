@@ -389,6 +389,21 @@ class LSPServer:
             "overflow": "trap",
             "target": "py",
         }
+        
+        # Performance optimization: caching
+        self._ast_cache: dict[str, tuple[Any, float]] = {}  # uri -> (ast, timestamp)
+        self._symbol_cache: dict[str, tuple[list[SymbolInfo], float]] = {}  # uri -> (symbols, timestamp)
+        self._completion_cache: dict[str, tuple[list[dict[str, Any]], float]] = {}  # context_key -> (completions, timestamp)
+        self._cache_ttl = 30.0  # Cache entries expire after 30 seconds
+        
+        # Performance monitoring
+        self._performance_stats = {
+            "parse_time": [],
+            "analysis_time": [],
+            "completion_time": [],
+            "cache_hits": 0,
+            "cache_misses": 0
+        }
     def _publish_diagnostics(self, uri: str, version: int, diagnostics: list[dict[str, Any]]) -> None:
         doc = self.docs.get(uri)
         if doc is None or doc.version != version:
@@ -403,22 +418,95 @@ class LSPServer:
     def _schedule_semantic(self, uri: str, version: int) -> None:
         self.pending[uri] = AnalysisTask(uri=uri, version=version, due_at=time.monotonic() + self.debounce_ms / 1000.0)
     def _parse_prog(self, doc: TextDocument):
+        """Parse program with caching for performance."""
         filename = _uri_to_filename(doc.uri)
+        
+        # Check cache first
+        cache_key = f"{doc.uri}:{doc.version}"
+        if cache_key in self._ast_cache:
+            cached_ast, timestamp = self._ast_cache[cache_key]
+            if time.time() - timestamp < self._cache_ttl:
+                self._performance_stats["cache_hits"] += 1
+                return cached_ast
+            else:
+                del self._ast_cache[cache_key]
+        
+        self._performance_stats["cache_misses"] += 1
+        start_time = time.perf_counter()
+        
         try:
             prog = parse(doc.text, filename=filename)
+            
+            # Cache the result
+            self._ast_cache[cache_key] = (prog, time.time())
+            
+            # Update performance stats
+            parse_time = time.perf_counter() - start_time
+            self._performance_stats["parse_time"].append(parse_time)
+            
+            # Keep only recent stats
+            if len(self._performance_stats["parse_time"]) > 100:
+                self._performance_stats["parse_time"] = self._performance_stats["parse_time"][-50:]
+            
+            return prog
         except ParseError:
             return None
-        return prog
+    
     def _update_symbol_index(self, uri: str) -> None:
+        """Update symbol index with caching."""
         doc = self.docs.get(uri)
         if doc is None:
             self.symbol_index.pop(uri, None)
             return
+        
+        # Check cache first
+        cache_key = f"{uri}:{doc.version}"
+        if cache_key in self._symbol_cache:
+            cached_symbols, timestamp = self._symbol_cache[cache_key]
+            if time.time() - timestamp < self._cache_ttl:
+                self.symbol_index[uri] = cached_symbols
+                return
+            else:
+                del self._symbol_cache[cache_key]
+        
         prog = self._parse_prog(doc)
         if prog is None:
             self.symbol_index[uri] = []
             return
-        self.symbol_index[uri] = _decl_symbols(prog, uri)
+        
+        symbols = _decl_symbols(prog, uri)
+        self.symbol_index[uri] = symbols
+        
+        # Cache the result
+        self._symbol_cache[cache_key] = (symbols, time.time())
+    
+    def _clean_expired_cache(self):
+        """Clean expired cache entries to prevent memory leaks."""
+        current_time = time.time()
+        
+        # Clean AST cache
+        expired_keys = [
+            key for key, (_, timestamp) in self._ast_cache.items()
+            if current_time - timestamp > self._cache_ttl
+        ]
+        for key in expired_keys:
+            del self._ast_cache[key]
+        
+        # Clean symbol cache
+        expired_keys = [
+            key for key, (_, timestamp) in self._symbol_cache.items()
+            if current_time - timestamp > self._cache_ttl
+        ]
+        for key in expired_keys:
+            del self._symbol_cache[key]
+        
+        # Clean completion cache
+        expired_keys = [
+            key for key, (_, timestamp) in self._completion_cache.items()
+            if current_time - timestamp > self._cache_ttl
+        ]
+        for key in expired_keys:
+            del self._completion_cache[key]
     def _update_module_graph(self, uri: str) -> None:
         doc = self.docs.get(uri)
         if doc is None:
@@ -458,6 +546,11 @@ class LSPServer:
     def _due_tasks(self) -> None:
         now = time.monotonic()
         due = [t for t in self.pending.values() if t.due_at <= now]
+        
+        # Clean expired cache entries periodically
+        if len(due) > 0 and int(now) % 60 == 0:  # Every minute
+            self._clean_expired_cache()
+        
         for task in due:
             self.pending.pop(task.uri, None)
             doc = self.docs.get(task.uri)
@@ -473,6 +566,12 @@ class LSPServer:
                 overflow=str(self.settings.get("overflow", "trap")),
             )
             elapsed = (time.perf_counter() - start) * 1000
+            self._performance_stats["analysis_time"].append(elapsed)
+            
+            # Keep only recent stats
+            if len(self._performance_stats["analysis_time"]) > 100:
+                self._performance_stats["analysis_time"] = self._performance_stats["analysis_time"][-50:]
+            
             self.log.debug("semantic diagnostics %s v%s in %.2fms", task.uri, task.version, elapsed)
             self._publish_diagnostics(task.uri, task.version, diags)
     def _local_decls(self, prog: Any, line: int, col: int) -> dict[str, tuple[int, int]]:
@@ -521,54 +620,121 @@ class LSPServer:
         walk(fn.body)
         return out
     def _definition_target(self, uri: str, line0: int, col0: int) -> list[dict[str, Any]]:
+        """Enhanced go-to-definition with multiple results and better type inference."""
         doc = self.docs.get(uri)
         if doc is None:
             return []
+        
         symbol = _word_at(doc.text, line0, col0)
         if not symbol:
             return []
+        
         line = line0 + 1
         col = col0 + 1
+        results = []
+        
+        # First check local scope (highest priority)
         prog = self._parse_and_analyze(doc)
         if prog is not None:
             locals_map = self._local_decls(prog, line, col)
             if symbol in locals_map:
                 dl, dc = locals_map[symbol]
-                return [
-                    {
-                        "uri": uri,
-                        "range": {
-                            "start": {"line": max(0, dl - 1), "character": max(0, dc - 1)},
-                            "end": {"line": max(0, dl - 1), "character": max(0, dc - 1 + len(symbol))},
-                        },
-                    }
-                ]
+                results.append({
+                    "uri": uri,
+                    "range": {
+                        "start": {"line": max(0, dl - 1), "character": max(0, dc - 1)},
+                        "end": {"line": max(0, dl - 1), "character": max(0, dc - 1 + len(symbol))},
+                    },
+                    "origin": "local"
+                })
+                
+                # If we found a local definition, return it immediately
+                return results
+            
+            # Check document-level declarations
             dmap = _decl_map(prog)
             if symbol in dmap:
                 d = dmap[symbol]
-                return [
-                    {
-                        "uri": uri,
-                        "range": {
-                            "start": {"line": max(0, d["line"] - 1), "character": max(0, d["col"] - 1)},
-                            "end": {"line": max(0, d["line"] - 1), "character": max(0, d["col"] - 1 + len(symbol))},
-                        },
-                    }
-                ]
+                results.append({
+                    "uri": uri,
+                    "range": {
+                        "start": {"line": max(0, d["line"] - 1), "character": max(0, d["col"] - 1)},
+                        "end": {"line": max(0, d["line"] - 1), "character": max(0, d["col"] - 1 + len(symbol))},
+                    },
+                    "origin": "document",
+                    "kind": d.get("kind", 6),
+                    "detail": d.get("detail", "")
+                })
+        
+        # Check workspace symbols (for functions, types, etc.)
+        workspace_matches = []
         for sym_uri, syms in self.symbol_index.items():
             for s in syms:
-                if s.name != symbol:
-                    continue
-                return [
-                    {
+                if s.name == symbol and sym_uri != uri:  # Avoid duplicates from current document
+                    match_info = {
                         "uri": sym_uri,
                         "range": {
                             "start": {"line": max(0, s.line - 1), "character": max(0, s.col - 1)},
                             "end": {"line": max(0, s.line - 1), "character": max(0, s.col - 1 + len(symbol))},
                         },
+                        "origin": "workspace",
+                        "kind": s.kind,
+                        "detail": s.detail
                     }
-                ]
-        return []
+                    
+                    # Prioritize by symbol kind and relevance
+                    priority = self._get_symbol_priority(s.kind, symbol)
+                    workspace_matches.append((priority, match_info))
+        
+        # Sort workspace matches by priority and add to results
+        workspace_matches.sort(key=lambda x: x[0])
+        results.extend([match for _, match in workspace_matches])
+        
+        # Check built-in functions and types
+        if symbol in BUILTIN_SIGS:
+            sig = BUILTIN_SIGS[symbol]
+            # For built-ins, we could return a documentation link or special marker
+            results.append({
+                "uri": "builtin://" + symbol,
+                "range": {
+                    "start": {"line": 0, "character": 0},
+                    "end": {"line": 0, "character": len(symbol)},
+                },
+                "origin": "builtin",
+                "detail": f"builtin {symbol}({', '.join(sig.args or [])}) {sig.ret}"
+            })
+        
+        return results
+    
+    def _get_symbol_priority(self, kind: int, symbol: str) -> int:
+        """Get priority for symbol ranking in go-to-definition results."""
+        # Higher priority = more likely to be the target
+        priority_map = {
+            12: 100,  # Function
+            23: 90,   # Struct
+            10: 80,   # Enum
+            5: 70,    # Type alias
+            8: 60,    # Field
+            6: 50,    # Variable
+            2: 40,    # Import
+        }
+        return priority_map.get(kind, 0)
+    
+    def _implementation_target(self, uri: str, line0: int, col0: int) -> list[dict[str, Any]]:
+        """Go to implementation - for trait implementations and function overrides."""
+        doc = self.docs.get(uri)
+        if doc is None:
+            return []
+        
+        symbol = _word_at(doc.text, line0, col0)
+        if not symbol:
+            return []
+        
+        results = []
+        
+        # For now, return definition targets
+        # In a full implementation, this would find trait implementations, overrides, etc.
+        return self._definition_target(uri, line0, col0)
     def _hover(self, uri: str, line0: int, col0: int) -> dict[str, Any] | None:
         doc = self.docs.get(uri)
         if doc is None:
@@ -600,44 +766,251 @@ class LSPServer:
             return {"contents": {"kind": "markdown", "value": f"`builtin {symbol}({args}) {sig.ret}`"}}
         return {"contents": {"kind": "markdown", "value": f"Astra symbol `{symbol}`"}}
     def _completion(self, uri: str, line0: int, col0: int) -> list[dict[str, Any]]:
+        """Enhanced completion with caching and performance monitoring."""
         doc = self.docs.get(uri)
         if doc is None:
             return []
+        
+        start_time = time.perf_counter()
+        
+        # Create cache key based on context
+        context_key = f"{uri}:{doc.version}:{line0}:{col0}"
+        
+        # Check cache first
+        if context_key in self._completion_cache:
+            cached_completions, timestamp = self._completion_cache[context_key]
+            if time.time() - timestamp < self._cache_ttl:
+                self._performance_stats["cache_hits"] += 1
+                return cached_completions
+            else:
+                del self._completion_cache[context_key]
+        
+        self._performance_stats["cache_misses"] += 1
+        
         out: list[dict[str, Any]] = []
         seen: set[str] = set()
-        def add(label: str, kind: int, detail: str, insert_text: str | None = None, insert_format: int | None = None) -> None:
+        
+        # Get context for intelligent completion
+        context = self._get_completion_context(doc, line0, col0)
+        
+        def add(label: str, kind: int, detail: str, insert_text: str | None = None, insert_format: int | None = None, priority: int = 0) -> None:
             if not label or label in seen:
                 return
             seen.add(label)
-            item: dict[str, Any] = {"label": label, "kind": kind, "detail": detail}
+            item: dict[str, Any] = {
+                "label": label, 
+                "kind": kind, 
+                "detail": detail,
+                "sortText": f"{priority:03d}{label}"
+            }
             if insert_text is not None:
                 item["insertText"] = insert_text
             if insert_format is not None:
                 item["insertTextFormat"] = insert_format
             out.append(item)
+        
+        # Context-aware suggestions
+        if context["in_function_call"]:
+            self._add_argument_completions(doc, context, add)
+        elif context["in_type_annotation"]:
+            self._add_type_completions(doc, context, add)
+        elif context["in_import"]:
+            self._add_import_completions(doc, context, add)
+        elif context["after_dot"]:
+            self._add_member_completions(doc, context, add)
+        else:
+            # Standard completions
+            self._add_standard_completions(doc, context, add)
+        
+        # Cache the result
+        self._completion_cache[context_key] = (out, time.time())
+        
+        # Update performance stats
+        completion_time = time.perf_counter() - start_time
+        self._performance_stats["completion_time"].append(completion_time)
+        
+        # Keep only recent stats
+        if len(self._performance_stats["completion_time"]) > 100:
+            self._performance_stats["completion_time"] = self._performance_stats["completion_time"][-50:]
+            
+        return out
+    
+    def _get_completion_context(self, doc: TextDocument, line: int, col: int) -> dict[str, Any]:
+        """Analyze the context around the cursor for intelligent completion."""
+        lines = doc.text.splitlines()
+        if line < 0 or line >= len(lines):
+            return {"in_function_call": False, "in_type_annotation": False, "in_import": False, "after_dot": False}
+        
+        current_line = lines[line]
+        prefix = current_line[:col]
+        suffix = current_line[col:]
+        
+        # Check for different contexts
+        context = {
+            "in_function_call": False,
+            "in_type_annotation": False, 
+            "in_import": False,
+            "after_dot": False,
+            "current_token": "",
+            "function_name": "",
+            "type_base": "",
+            "object_type": None,
+            "line": line,
+            "col": col
+        }
+        
+        # Function call context
+        if '(' in prefix and not prefix.rstrip().endswith(')'):
+            context["in_function_call"] = True
+            # Extract function name
+            func_match = re.search(r'(\w+)\s*\(\s*[^)]*$', prefix)
+            if func_match:
+                context["function_name"] = func_match.group(1)
+        
+        # Type annotation context  
+        if ':' in prefix and ('fn' in prefix or 'let' in prefix or 'mut' in prefix):
+            context["in_type_annotation"] = True
+            type_match = re.search(r':\s*(\w*)$', prefix)
+            if type_match:
+                context["type_base"] = type_match.group(1)
+        
+        # Import context
+        if 'import' in prefix:
+            context["in_import"] = True
+        
+        # Member access context (after dot)
+        if prefix.endswith('.'):
+            context["after_dot"] = True
+            # Try to determine object type
+            obj_match = re.search(r'(\w+)\s*\.$', prefix)
+            if obj_match:
+                obj_name = obj_match.group(1)
+                context["current_token"] = obj_name
+        
+        # Current token being typed
+        token_match = re.search(r'(\w+)$', prefix)
+        if token_match:
+            context["current_token"] = token_match.group(1)
+            
+        return context
+    
+    def _add_standard_completions(self, doc: TextDocument, context: dict[str, Any], add) -> None:
+        """Add standard completions for keywords, builtins, and symbols."""
+        # Keywords with snippets
         for k in KEYWORDS:
             snippet = SNIPPETS.get(k)
             if snippet:
-                add(k, 15, "snippet", insert_text=snippet, insert_format=2)
+                add(k, 15, "snippet", insert_text=snippet, insert_format=2, priority=100)
             else:
-                add(k, 14, "keyword")
+                add(k, 14, "keyword", priority=90)
+        
+        # Built-in functions
         for b in BUILTIN_SIGS:
             if not b.startswith("__"):
-                add(b, 3, "builtin")
+                sig = BUILTIN_SIGS[b]
+                args = ", ".join(sig.args or ["..."])
+                detail = f"builtin {b}({args}) {sig.ret}"
+                add(b, 3, detail, priority=80)
+        
+        # Local symbols
         prog = self._parse_and_analyze(doc)
         if prog is not None:
-            for sym in _decl_symbols(prog, uri):
-                if sym.kind == 12:
-                    add(sym.name, 3, "function", insert_text=f"{sym.name}($1)", insert_format=2)
+            # Document symbols
+            for sym in _decl_symbols(prog, doc.uri):
+                if sym.kind == 12:  # Function
+                    add(sym.name, 3, sym.detail, insert_text=f"{sym.name}($1)", insert_format=2, priority=70)
                 else:
-                    add(sym.name, 6, sym.detail)
-            locals_map = self._local_decls(prog, line0 + 1, col0 + 1)
+                    add(sym.name, 6, sym.detail, priority=60)
+            
+            # Local variables in scope
+            locals_map = self._local_decls(prog, context.get("line", 0) + 1, context.get("col", 0) + 1)
             for name in sorted(locals_map):
-                add(name, 6, "local")
+                add(name, 6, "local variable", priority=85)
+        
+        # Workspace symbols
         for syms in self.symbol_index.values():
             for s in syms:
-                add(s.name, 6, s.detail)
-        return out
+                if s.uri != doc.uri:  # Don't duplicate local symbols
+                    add(s.name, 6, s.detail, priority=50)
+    
+    def _add_type_completions(self, doc: TextDocument, context: dict[str, Any], add) -> None:
+        """Add type-specific completions."""
+        # Basic types
+        basic_types = ["Int", "Float", "Bool", "String", "Char", "Void"]
+        for t in basic_types:
+            add(t, 5, f"primitive type {t}", priority=90)
+        
+        # Generic types
+        generic_types = ["Vec", "Option", "Result", "HashMap", "HashSet"]
+        for t in generic_types:
+            add(t, 5, f"generic type {t}", insert_text=f"{t}<$1>", insert_format=2, priority=85)
+        
+        # Pointer and reference types
+        pointer_types = ["Ptr", "Ref"]
+        for t in pointer_types:
+            add(t, 5, f"pointer/reference type {t}", insert_text=f"{t}<$1>", insert_format=2, priority=80)
+        
+        # User-defined types from workspace
+        for syms in self.symbol_index.values():
+            for s in syms:
+                if s.kind in [23, 10]:  # Struct, Enum
+                    add(s.name, 5, s.detail, priority=75)
+    
+    def _add_import_completions(self, doc: TextDocument, context: dict[str, Any], add) -> None:
+        """Add import-specific completions."""
+        # Standard library modules
+        stdlib_modules = ["algorithm", "atomic", "c", "collections", "gpu", "math", "os", "time"]
+        for module in stdlib_modules:
+            add(module, 9, f"std library module {module}", priority=90)
+        
+        # Local files that could be imported
+        try:
+            current_dir = Path(_uri_to_filename(doc.uri)).parent
+            for file_path in current_dir.rglob("*.arixa"):
+                if file_path.is_file():
+                    rel_path = file_path.relative_to(current_dir)
+                    module_name = str(rel_path.with_suffix("")).replace("/", ".")
+                    add(module_name, 9, f"local module {module_name}", priority=80)
+        except Exception:
+            pass
+    
+    def _add_argument_completions(self, doc: TextDocument, context: dict[str, Any], add) -> None:
+        """Add argument completions for function calls."""
+        func_name = context.get("function_name", "")
+        
+        # Check if it's a known function with specific argument types
+        if func_name in BUILTIN_SIGS:
+            sig = BUILTIN_SIGS[func_name]
+            if sig.args:
+                # Suggest variables that match the parameter types
+                prog = self._parse_and_analyze(doc)
+                if prog:
+                    locals_map = self._local_decls(prog, context.get("line", 0) + 1, context.get("col", 0) + 1)
+                    for var_name in sorted(locals_map):
+                        add(var_name, 6, f"variable {var_name}", priority=90)
+        
+        # General variable suggestions
+        prog = self._parse_and_analyze(doc)
+        if prog:
+            locals_map = self._local_decls(prog, context.get("line", 0) + 1, context.get("col", 0) + 1)
+            for var_name in sorted(locals_map):
+                add(var_name, 6, f"variable {var_name}", priority=80)
+    
+    def _add_member_completions(self, doc: TextDocument, context: dict[str, Any], add) -> None:
+        """Add member completions for dot access."""
+        # This would require type inference to determine the object's type
+        # For now, add common struct methods and fields
+        
+        # Common method names
+        common_methods = ["len", "push", "pop", "get", "set", "clear", "is_empty", "clone"]
+        for method in common_methods:
+            add(method, 3, f"method {method}", insert_text=f"{method}($1)", insert_format=2, priority=85)
+        
+        # Common field names  
+        common_fields = ["data", "size", "capacity", "length", "count"]
+        for field in common_fields:
+            add(field, 8, f"field {field}", priority=80)
+    
     def _signature_help(self, uri: str, line0: int, col0: int) -> dict[str, Any] | None:
         doc = self.docs.get(uri)
         if doc is None:
@@ -1006,6 +1379,7 @@ class LSPServer:
                                 "triggerCharacters": [".", "\"", "/"],
                             },
                             "definitionProvider": True,
+                            "implementationProvider": True,
                             "signatureHelpProvider": {"triggerCharacters": ["(", ","]},
                             "referencesProvider": True,
                             "renameProvider": True,
@@ -1063,6 +1437,13 @@ class LSPServer:
                 pos = p.get("position", {})
                 defs = self._definition_target(uri, int(pos.get("line", 0)), int(pos.get("character", 0)))
                 self._respond(msg_id, defs[0] if len(defs) == 1 else defs or None)
+                return True
+            if method == "textDocument/implementation":
+                p = msg.get("params", {})
+                uri = p.get("textDocument", {}).get("uri", "")
+                pos = p.get("position", {})
+                impls = self._implementation_target(uri, int(pos.get("line", 0)), int(pos.get("character", 0)))
+                self._respond(msg_id, impls[0] if len(impls) == 1 else impls or None)
                 return True
             if method == "textDocument/signatureHelp":
                 p = msg.get("params", {})

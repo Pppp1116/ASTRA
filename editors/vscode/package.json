@@ -133,6 +133,18 @@
       {
         "command": "arixa.showEnhancedErrors",
         "title": "Astra: Show Enhanced Error Messages"
+      },
+      {
+        "command": "arixa.showPackageManager",
+        "title": "Astra: Show Package Manager"
+      },
+      {
+        "command": "arixa.showProfiler",
+        "title": "Astra: Show Profiler"
+      },
+      {
+        "command": "arixa.startDebugging",
+        "title": "Astra: Start Debugging"
       }
     ],
     "configuration": {

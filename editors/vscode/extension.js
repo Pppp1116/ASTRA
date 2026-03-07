@@ -6,6 +6,7 @@ const { spawn, spawnSync } = require('child_process');
 const vscode = require('vscode');
 const { LanguageClient, State, Trace } = require('vscode-languageclient/node');
 const ProfilerUI = require('./profiler/profiler-ui');
+const PackageManagerUI = require('./package-manager-ui');
 
 /** @type {LanguageClient | undefined} */
 let client;
@@ -21,6 +22,8 @@ let currentCompiler;
 let updateTimer;
 /** @type {ProfilerUI | undefined} */
 let profilerUI;
+/** @type {PackageManagerUI | undefined} */
+let packageManagerUI;
 /** @type {boolean} */
 let isProfiling = false;
 /** @type {any} */
@@ -927,8 +930,24 @@ async function activate(context) {
   });
   context.subscriptions.push(startDebuggingDisposable);
 
+  // Package Manager commands
+  const showPackageManagerDisposable = vscode.commands.registerCommand('astra.showPackageManager', async () => {
+    try {
+      if (!packageManagerUI) {
+        packageManagerUI = new PackageManagerUI(context);
+      }
+      packageManagerUI.showPackageManager();
+    } catch (error) {
+      vscode.window.showErrorMessage(`Failed to show package manager: ${error.message}`);
+    }
+  });
+  context.subscriptions.push(showPackageManagerDisposable);
+
   // Initialize profiler UI
   profilerUI = new ProfilerUI(context);
+
+  // Initialize package manager UI
+  packageManagerUI = new PackageManagerUI(context);
 
   const configDisposable = vscode.workspace.onDidChangeConfiguration(async (event) => {
     if (

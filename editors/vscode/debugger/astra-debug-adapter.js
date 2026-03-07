@@ -124,70 +124,6 @@ class AstraDebugSession extends EventEmitter {
     }
 
     /**
-     * Set breakpoints
-     */
-    setBreakpointsRequest(args, response) {
-        const { source, breakpoints } = args;
-        const sourcePath = source.path;
-        
-        const clientBreakpoints = [];
-        
-        // Clear existing breakpoints for this file
-        this.breakpoints.delete(sourcePath);
-        
-        for (const bp of breakpoints || []) {
-            const verified = this.verifyBreakpoint(sourcePath, bp.line);
-            
-            clientBreakpoints.push({
-                id: bp.id,
-                verified: verified.verified,
-                message: verified.message,
-                source: source,
-                line: bp.line,
-                column: bp.column,
-                endLine: bp.endLine,
-                endColumn: bp.endColumn
-            });
-            
-            if (verified.verified) {
-                this.breakpoints.set(sourcePath, this.breakpoints.get(sourcePath) || []);
-                this.breakpoints.get(sourcePath).push({
-                    line: bp.line,
-                    condition: bp.condition,
-                    hitCondition: bp.hitCondition,
-                    logMessage: bp.logMessage
-                });
-            }
-        }
-        
-        response.body = { breakpoints: clientBreakpoints };
-        this.sendResponse(response);
-    }
-
-    /**
-     * Verify a breakpoint
-     */
-    verifyBreakpoint(sourcePath, line) {
-        try {
-            // Check if the file exists and has enough lines
-            if (fs.existsSync(sourcePath)) {
-                const content = fs.readFileSync(sourcePath, 'utf8');
-                const lines = content.split('\n');
-                
-                if (line > 0 && line <= lines.length) {
-                    return { verified: true };
-                } else {
-                    return { verified: false, message: `Line ${line} is outside file bounds (1-${lines.length})` };
-                }
-            } else {
-                return { verified: false, message: `Source file not found: ${sourcePath}` };
-            }
-        } catch (error) {
-            return { verified: false, message: `Error verifying breakpoint: ${error.message}` };
-        }
-    }
-
-    /**
      * Configuration done
      */
     configurationDoneRequest(args, response) {
@@ -258,29 +194,154 @@ class AstraDebugSession extends EventEmitter {
     }
 
     /**
-     * Get stack trace
+     * Get stack trace with enhanced ASTRA support
      */
     stackTraceRequest(args, response) {
         const { startFrame, levels } = args;
         
-        // For now, return a simple stack trace
-        // In a real implementation, this would parse the debuggee's stack
-        const stackFrames = [
-            {
-                id: 1,
-                name: 'main',
-                source: { name: path.basename(this.currentFile), path: this.currentFile },
-                line: this.currentLine,
-                column: 0
-            }
-        ];
-        
-        response.body = {
-            stackFrames: stackFrames,
-            totalFrames: stackFrames.length
-        };
+        // Try to get actual stack trace from debuggee
+        if (this.debuggee && this.isPaused) {
+            this.sendDebugCommand(`stacktrace:${startFrame || 0}:${levels || 20}`);
+            
+            // For now, return current frame info
+            // In a real implementation, this would parse the response from debuggee
+            const stackFrames = [
+                {
+                    id: 1,
+                    name: this.currentFunction || 'main',
+                    source: { 
+                        name: path.basename(this.currentFile), 
+                        path: this.currentFile 
+                    },
+                    line: this.currentLine,
+                    column: this.currentColumn || 0,
+                    presentationHint: 'normal'
+                }
+            ];
+            
+            response.body = {
+                stackFrames: stackFrames,
+                totalFrames: stackFrames.length
+            };
+        } else {
+            response.body = {
+                stackFrames: [],
+                totalFrames: 0
+            };
+        }
         
         this.sendResponse(response);
+    }
+
+    /**
+     * Enhanced set breakpoints with ASTRA line mapping
+     */
+    setBreakpointsRequest(args, response) {
+        const { source, breakpoints } = args;
+        const sourcePath = source.path;
+        
+        const clientBreakpoints = [];
+        
+        // Clear existing breakpoints for this file
+        this.breakpoints.delete(sourcePath);
+        
+        for (const bp of breakpoints || []) {
+            // Verify breakpoint with ASTRA source mapping
+            const verified = this.verifyAstraBreakpoint(sourcePath, bp.line, bp.column);
+            
+            clientBreakpoints.push({
+                id: bp.id,
+                verified: verified.verified,
+                message: verified.message,
+                source: source,
+                line: verified.actualLine || bp.line,
+                column: verified.actualColumn || bp.column,
+                endLine: bp.endLine,
+                endColumn: bp.endColumn
+            });
+            
+            if (verified.verified) {
+                this.breakpoints.set(sourcePath, this.breakpoints.get(sourcePath) || []);
+                this.breakpoints.get(sourcePath).push({
+                    line: verified.actualLine || bp.line,
+                    column: verified.actualColumn || bp.column,
+                    condition: bp.condition,
+                    hitCondition: bp.hitCondition,
+                    logMessage: bp.logMessage
+                });
+                
+                // Send breakpoint to debuggee
+                this.sendDebugCommand(`breakpoint:${sourcePath}:${verified.actualLine || bp.line}:${bp.column || 0}:${bp.condition || ''}`);
+            }
+        }
+        
+        response.body = { breakpoints: clientBreakpoints };
+        this.sendResponse(response);
+    }
+
+    /**
+     * Verify ASTRA breakpoint with source mapping
+     */
+    verifyAstraBreakpoint(sourcePath, line, column = 0) {
+        try {
+            if (fs.existsSync(sourcePath)) {
+                const content = fs.readFileSync(sourcePath, 'utf8');
+                const lines = content.split('\n');
+                
+                if (line > 0 && line <= lines.length) {
+                    const lineContent = lines[line - 1];
+                    
+                    // Check if line contains executable code
+                    if (this.isExecutableLine(lineContent)) {
+                        return { 
+                            verified: true, 
+                            actualLine: line,
+                            actualColumn: column
+                        };
+                    } else {
+                        // Find next executable line
+                        for (let i = line; i <= Math.min(line + 5, lines.length); i++) {
+                            if (this.isExecutableLine(lines[i - 1])) {
+                                return { 
+                                    verified: true, 
+                                    actualLine: i,
+                                    message: `Moved to line ${i} (next executable line)`
+                                };
+                            }
+                        }
+                        return { 
+                            verified: false, 
+                            message: `No executable code found near line ${line}` 
+                        };
+                    }
+                } else {
+                    return { verified: false, message: `Line ${line} is outside file bounds (1-${lines.length})` };
+                }
+            } else {
+                return { verified: false, message: `Source file not found: ${sourcePath}` };
+            }
+        } catch (error) {
+            return { verified: false, message: `Error verifying breakpoint: ${error.message}` };
+        }
+    }
+
+    /**
+     * Check if a line contains executable code
+     */
+    isExecutableLine(lineContent) {
+        const trimmed = lineContent.trim();
+        
+        // Skip empty lines, comments, and braces
+        if (!trimmed || 
+            trimmed.startsWith('//') || 
+            trimmed.startsWith('/*') || 
+            trimmed === '{' || 
+            trimmed === '}' ||
+            trimmed.startsWith('fn ') && trimmed.includes('{') && !trimmed.includes('}')) {
+            return false;
+        }
+        
+        return true;
     }
 
     /**
