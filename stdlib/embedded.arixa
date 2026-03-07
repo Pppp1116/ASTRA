@@ -71,7 +71,7 @@ struct UARTConfig {
 struct PWMConfig {
     frequency UInt32,
     duty_cycle Float,
-    resolution UInt16,
+    resolution u16,
 }
 
 /// ADC configuration.
@@ -95,7 +95,7 @@ fn gpio_init(pin GPIOPin, mode GPIOMode, pull GPIOPull, output_type GPIOOutputTy
     return __gpio_init_impl(pin, mode, pull, output_type, speed);
 }
 
-/// Set GPIO pin output level.
+/// Write GPIO pin output level.
 fn gpio_write(pin GPIOPin, level Bool) {
     __gpio_write_impl(pin, level);
 }
@@ -106,18 +106,19 @@ fn gpio_read(pin GPIOPin) Bool {
 }
 
 /// Toggle GPIO pin output level.
-fn gpio_toggle(pin GPIOPin) {
-    current = gpio_read(pin);
-    gpio_write(pin, !current);
-}
+// fn gpio_toggle(pin GPIOPin) {
+//     level = gpio_read(pin);
+//     new_level = if level { false } else { true };
+//     gpio_write(pin, new_level);
+// }
 
 /// Set multiple GPIO pins simultaneously.
-fn gpio_write_mask(port UInt8, mask UInt16, values UInt16) {
+fn gpio_write_mask(port UInt8, mask u16, values u16) {
     __gpio_write_mask_impl(port, mask, values);
 }
 
 /// Read multiple GPIO pins simultaneously.
-fn gpio_read_mask(port UInt8, mask UInt16) UInt16 {
+fn gpio_read_mask(port UInt8, mask u16) u16 {
     return __gpio_read_mask_impl(port, mask);
 }
 
@@ -161,17 +162,17 @@ fn i2c_init(i2c_num UInt8, config I2CConfig) Bool {
 }
 
 /// Write data to I2C device.
-fn i2c_write(i2c_num UInt8, device_address UInt16, data Vec<UInt8>) Bool {
+fn i2c_write(i2c_num UInt8, device_address u16, data Vec<UInt8>) Bool {
     return __i2c_write_impl(i2c_num, device_address, data);
 }
 
 /// Read data from I2C device.
-fn i2c_read(i2c_num UInt8, device_address UInt16, length Int) Vec<UInt8>? {
+fn i2c_read(i2c_num UInt8, device_address u16, length Int) Vec<UInt8>? {
     return __i2c_read_impl(i2c_num, device_address, length);
 }
 
 /// Write data to I2C register.
-fn i2c_write_register(i2c_num UInt8, device_address UInt16, register_address UInt8, data Vec<UInt8>) Bool {
+fn i2c_write_register(i2c_num UInt8, device_address u16, register_address UInt8, data Vec<UInt8>) Bool {
     mut payload = vec_new() as Vec<UInt8>;
     vec_push(payload, register_address);
     
@@ -179,7 +180,7 @@ fn i2c_write_register(i2c_num UInt8, device_address UInt16, register_address UIn
     while i < vec_len(data) {
         byte = vec_get(data, i);
         if byte != none {
-            vec_push(payload, (byte as UInt8?));
+            vec_push(payload, byte as UInt8);
         }
         else {}
         i += 1;
@@ -189,7 +190,7 @@ fn i2c_write_register(i2c_num UInt8, device_address UInt16, register_address UIn
 }
 
 /// Read data from I2C register.
-fn i2c_read_register(i2c_num UInt8, device_address UInt16, register_address UInt8, length Int) Vec<UInt8>? {
+fn i2c_read_register(i2c_num UInt8, device_address u16, register_address UInt8, length Int) Vec<UInt8>? {
     // Write register address first
     mut addr_vec = vec_new() as Vec<UInt8>;
     vec_push(addr_vec, register_address);
@@ -203,7 +204,7 @@ fn i2c_read_register(i2c_num UInt8, device_address UInt16, register_address UInt
 }
 
 /// Check if I2C device responds to address.
-fn i2c_device_present(i2c_num UInt8, device_address UInt16) Bool {
+fn i2c_device_present(i2c_num UInt8, device_address u16) Bool {
     return __i2c_device_present_impl(i2c_num, device_address);
 }
 
@@ -220,15 +221,15 @@ fn uart_write(uart_num UInt8, data Vec<UInt8>) Bool {
 }
 
 /// Write string to UART.
-fn uart_write_string(uart_num UInt8, text String) Bool {
-    mut data = vec_new() as Vec<UInt8>;
-    mut i = 0;
-    while i < len(text) {
-        vec_push(data, text[i] as UInt8);
-        i += 1;
-    }
-    return uart_write(uart_num, data);
-}
+// fn uart_write_string(uart_num UInt8, text String) Bool {
+//     mut data = vec_new() as Vec<UInt8>;
+//     mut i = 0;
+//     while i < str_length(text) {
+//         vec_push(data, text[i] as UInt8);
+//         i += 1;
+//     }
+//     return uart_write(uart_num, data);
+// }
 
 /// Read data from UART (blocking).
 fn uart_read(uart_num UInt8, length Int) Vec<UInt8>? {
@@ -285,7 +286,7 @@ fn adc_init(adc_num UInt8, channel UInt8, config ADCConfig) Bool {
 }
 
 /// Read ADC value.
-fn adc_read(adc_num UInt8, channel UInt8) UInt16? {
+fn adc_read(adc_num UInt8, channel UInt8) u16? {
     return __adc_read_impl(adc_num, channel);
 }
 
@@ -298,7 +299,7 @@ fn adc_read_voltage(adc_num UInt8, channel UInt8, reference_voltage Float) Float
     else {}
     
     resolution = 4096.0; // 12-bit ADC
-    return ((raw_value as UInt16?)?) as Float * reference_voltage / resolution;
+    return (raw_value as u16) as Float * reference_voltage / resolution;
 }
 
 /// Start ADC conversion (non-blocking).
@@ -348,10 +349,9 @@ fn timer_delay_ms(timer_num UInt8, milliseconds UInt32) {
     timer_start(timer_num);
     while true {
         count = timer_get_count(timer_num);
-        if count != none && (count as UInt32?)?) >= milliseconds {
+        if count != none && (count as UInt32?) >= milliseconds {
             break;
         }
-        else {}
     }
     timer_stop(timer_num);
 }
@@ -359,30 +359,30 @@ fn timer_delay_ms(timer_num UInt8, milliseconds UInt32) {
 // Utility Functions
 
 /// Convert frequency to timer period.
-fn frequency_to_period(frequency UInt32, clock_frequency UInt32) UInt32 {
+fn frequency_to_period(frequency u32, clock_frequency u32) u32 {
     if frequency == 0 {
-        return 0;
+        return 0 as u32;
     }
     else {}
     return clock_frequency / frequency;
 }
 
 /// Convert duty cycle percentage to compare value.
-fn duty_cycle_to_compare(duty_cycle Float, period UInt32) UInt32 {
+fn duty_cycle_to_compare(duty_cycle Float, period u32) u32 {
     if duty_cycle < 0.0 {
-        return 0;
-    }
-    else if duty_cycle > 100.0 {
-        return period;
-    }
-    else {
-        return (period as Float * duty_cycle / 100.0) as UInt32;
+        return 0 as u32;
+    } else {
+        if duty_cycle > 100.0 {
+            return period;
+        } else {
+            return (period as Float * duty_cycle / 100.0) as u32;
+        }
     }
 }
 
 /// Create GPIO pin from port and pin numbers.
 fn gpio_pin(port UInt8, pin UInt8) GPIOPin {
-    return GPIOPin { port: port, pin: pin };
+    return GPIOPin(port, pin);
 }
 
 /// Common GPIO pin definitions (platform-specific).
@@ -393,8 +393,8 @@ const GPIO_PIN_BUTTON = gpio_pin(0, 0);  // Typically PA0 on STM32
 extern fn __gpio_init_impl(pin GPIOPin, mode GPIOMode, pull GPIOPull, output_type GPIOOutputType, speed GPIOSpeed) Bool;
 extern fn __gpio_write_impl(pin GPIOPin, level Bool) Void;
 extern fn __gpio_read_impl(pin GPIOPin) Bool;
-extern fn __gpio_write_mask_impl(port UInt8, mask UInt16, values UInt16) Void;
-extern fn __gpio_read_mask_impl(port UInt8, mask UInt16) UInt16;
+extern fn __gpio_write_mask_impl(port UInt8, mask u16, values u16) Void;
+extern fn __gpio_read_mask_impl(port UInt8, mask u16) u16;
 extern fn __gpio_set_alternate_function_impl(pin GPIOPin, function UInt8) Bool;
 
 extern fn __spi_init_impl(spi_num UInt8, config SPIConfig) Bool;
@@ -403,9 +403,9 @@ extern fn __spi_write_impl(spi_num UInt8, data Vec<UInt8>) Bool;
 extern fn __spi_read_impl(spi_num UInt8, length Int) Vec<UInt8>?;
 
 extern fn __i2c_init_impl(i2c_num UInt8, config I2CConfig) Bool;
-extern fn __i2c_write_impl(i2c_num UInt8, device_address UInt16, data Vec<UInt8>) Bool;
-extern fn __i2c_read_impl(i2c_num UInt8, device_address UInt16, length Int) Vec<UInt8>?;
-extern fn __i2c_device_present_impl(i2c_num UInt8, device_address UInt16) Bool;
+extern fn __i2c_write_impl(i2c_num UInt8, device_address u16, data Vec<UInt8>) Bool;
+extern fn __i2c_read_impl(i2c_num UInt8, device_address u16, length Int) Vec<UInt8>?;
+extern fn __i2c_device_present_impl(i2c_num UInt8, device_address u16) Bool;
 
 extern fn __uart_init_impl(uart_num UInt8, config UARTConfig) Bool;
 extern fn __uart_write_impl(uart_num UInt8, data Vec<UInt8>) Bool;
@@ -421,7 +421,7 @@ extern fn __pwm_start_impl(pwm_num UInt8, channel UInt8) Bool;
 extern fn __pwm_stop_impl(pwm_num UInt8, channel UInt8) Bool;
 
 extern fn __adc_init_impl(adc_num UInt8, channel UInt8, config ADCConfig) Bool;
-extern fn __adc_read_impl(adc_num UInt8, channel UInt8) UInt16?;
+extern fn __adc_read_impl(adc_num UInt8, channel UInt8) u16?;
 extern fn __adc_start_conversion_impl(adc_num UInt8, channel UInt8) Bool;
 extern fn __adc_conversion_complete_impl(adc_num UInt8) Bool;
 

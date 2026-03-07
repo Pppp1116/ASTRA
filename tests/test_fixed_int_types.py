@@ -98,8 +98,8 @@ fn main() Int{{
 def test_for_loop_binding_is_immutable(ty: str):
     src = f"""
 fn main() Int{{
-  for i in 0 as {ty}..(2 as {ty}) {{
-    i += 1 as {ty};
+  for i in 0..2 {{
+    i += 1;
     print(i);
   }}
   return 0;

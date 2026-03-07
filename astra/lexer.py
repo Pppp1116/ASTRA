@@ -36,9 +36,9 @@ KEYWORDS = {
     "as",
     "sizeof",
     "alignof",
-    "step",
     "try",
     "catch",
+    "const",
 }
 
 MULTI_TOKENS = [
@@ -164,6 +164,14 @@ def lex(src: str, filename: str = "<input>") -> list[Token]:
 
         if src.startswith("//", i):
             j = i + 2
+            while j < len(src) and src[j] != "\n":
+                j += 1
+            line, col = _advance_pos(src[i:j], line, col)
+            i = j
+            continue
+
+        if src.startswith("#", i):
+            j = i + 1
             while j < len(src) and src[j] != "\n":
                 j += 1
             line, col = _advance_pos(src[i:j], line, col)

@@ -408,6 +408,20 @@ class Parser:
                 self._err("@derive is only valid on struct/enum declarations")
                 raise ParseError(self.errors[-1])
             return self.parse_type_alias()
+        if self.cur().kind == "const":
+            if link_libs:
+                self._err("@link is only valid on extern function declarations")
+                raise ParseError(self.errors[-1])
+            if is_unsafe or is_async or is_gpu:
+                self._err("const cannot be prefixed with unsafe/async/gpu")
+                raise ParseError(self.errors[-1])
+            if is_packed:
+                self._err("@packed is only valid on struct declarations")
+                raise ParseError(self.errors[-1])
+            if derives:
+                self._err("@derive is only valid on struct/enum declarations")
+                raise ParseError(self.errors[-1])
+            return self.parse_const(is_pub, doc)
         if self.cur().kind == "extern":
             if is_gpu:
                 self._err("extern functions cannot be prefixed with gpu")
@@ -548,6 +562,7 @@ class Parser:
     def _parse_param_type(self) -> tuple[str, str, bool]:
         is_mut = bool(self.opt("mut"))
         name = self.eat("IDENT").text
+        self.opt(":")  # Consume optional colon
         typ = self.parse_type()
         return name, typ, is_mut
 
@@ -730,6 +745,23 @@ class Parser:
         self.opt(";")
         return TypeAliasDecl(name, generics, target, tok.pos, tok.line, tok.col)
 
+    def parse_const(self, is_pub: bool = False, doc: str = "") -> ConstDecl:
+        """Parse the `const` grammar production from the token stream.
+        
+        Parameters:
+            is_pub: Input value used by this routine.
+            doc: Input value used by this routine.
+        
+        Returns:
+            Value described by the function return annotation.
+        """
+        tok = self.eat("const")
+        name = self.eat("IDENT").text
+        self.eat("=")
+        expr = self.parse_expr()
+        self.opt(";")
+        return ConstDecl(name, expr, is_pub, doc, tok.pos, tok.line, tok.col)
+
     def parse_trait(self, is_pub: bool = False, doc: str = "") -> TraitDecl:
         tok = self.eat("trait")
         name = self.eat("IDENT").text
@@ -872,11 +904,11 @@ class Parser:
             reassign_if_exists=reassign_if_exists,
         )
 
-    def parse_stmt(self):
+    def parse_stmt(self, allow_no_semicolon: bool = False):
         """Parse the `stmt` grammar production from the token stream.
         
         Parameters:
-            none
+            allow_no_semicolon: If True, don't require a trailing semicolon
         
         Returns:
             Value produced by the routine, if any.
@@ -896,19 +928,29 @@ class Parser:
         if self.opt("return"):
             if self.opt(";"):
                 return ReturnStmt(None, tok.pos, tok.line, tok.col)
-            e = self.parse_expr()
-            self.eat(";")
-            return ReturnStmt(e, tok.pos, tok.line, tok.col)
+            else:
+                e = self.parse_expr()
+                if not allow_no_semicolon:
+                    self.eat(";")
+                return ReturnStmt(e, tok.pos, tok.line, tok.col)
         if self.opt("break"):
-            self.eat(";")
+            if not allow_no_semicolon:
+                self.eat(";")
             return BreakStmt(tok.pos, tok.line, tok.col)
         if self.opt("continue"):
-            self.eat(";")
+            if not allow_no_semicolon:
+                self.eat(";")
             return ContinueStmt(tok.pos, tok.line, tok.col)
         if self.opt("defer"):
             e = self.parse_expr()
-            self.eat(";")
+            if not allow_no_semicolon:
+                self.eat(";")
             return DeferStmt(e, tok.pos, tok.line, tok.col)
+        if self.opt("drop"):
+            e = self.parse_expr()
+            if not allow_no_semicolon:
+                self.eat(";")
+            return DropStmt(e, tok.pos, tok.line, tok.col)
         if self.opt("comptime"):
             body = self.parse_block()
             return ComptimeStmt(body, tok.pos, tok.line, tok.col)
@@ -962,16 +1004,8 @@ class Parser:
                     self._err("expected identifier after 'mut' in for loop")
                     raise ParseError(self.errors[-1])
             else:
-                # Check for iterator-style for loop
-                if self.cur().kind == "IDENT" and self.peek().kind == "in":
-                    var_name = self.eat("IDENT").text
-                    self.eat("in")
-                    iterable = self.parse_expr()
-                    body = self.parse_block()
-                    return IteratorForStmt(var_name, iterable, body, tok.pos, tok.line, tok.col)
-                else:
-                    # Fall back to existing for loop parsing
-                    return self.parse_for(tok)
+                # Fall back to existing for loop parsing (handles ranges)
+                return self.parse_for(tok)
         if self.opt("try"):
             return self.parse_try_catch(tok)
         if self.opt("match"):
@@ -992,6 +1026,9 @@ class Parser:
             raise ParseError(self.errors[-1])
         if self.cur().kind == ";":
             self.eat(";")
+        elif allow_no_semicolon and self.cur().kind == ",":
+            # Allow comma as terminator for match arms
+            pass
         elif self.cur().kind != "}":
             self._err("expected `;`", self.cur())
             raise ParseError(self.errors[-1])
@@ -1015,7 +1052,13 @@ class Parser:
             for pat, arm in tail.arms:
                 if not arm:
                     return body
-                new_arms.append((pat, self._rewrite_implicit_tail_return(arm)))
+                # Handle both single statements and blocks
+                if isinstance(arm, list):
+                    new_arm = self._rewrite_implicit_tail_return(arm)
+                else:
+                    # Single statement - wrap in list to normalize
+                    new_arm = self._rewrite_implicit_tail_return([arm])
+                new_arms.append((pat, new_arm))
             new_tail = MatchStmt(tail.expr, new_arms, tail.pos, tail.line, tail.col)
             return body[:-1] + [new_tail]
         if isinstance(tail, UnsafeStmt):
@@ -1062,19 +1105,44 @@ class Parser:
         while self.cur().kind != "}":
             pattern = self.parse_match_pattern()
             self.eat("=>")
-            # Check if it's a single expression or block
-            if self.cur().kind != "{":
-                # Single expression arm
-                expr_arm = self.parse_expr()
-                self.opt(",")
-                arms.append((pattern, expr_arm))
-            else:
-                # Block arm (existing behavior)
+            # Check if it's a block or statement
+            if self.cur().kind == "{":
+                # Block arm
                 body = self.parse_block()
                 self.opt(",")
                 arms.append((pattern, body))
+            else:
+                # Statement arm (like return, break, etc.)
+                # Parse statement without requiring semicolon for match arms
+                stmt = self._parse_match_arm_stmt()
+                # Normalize to list for consistent handling
+                if not isinstance(stmt, list):
+                    stmt = [stmt]
+                self.opt(",")
+                arms.append((pattern, stmt))
         self.eat("}")
         return MatchStmt(expr, arms, tok.pos, tok.line, tok.col)
+
+    def _parse_match_arm_stmt(self):
+        """Parse a statement within a match arm, without requiring semicolon."""
+        if self.cur().kind == "return":
+            tok = self.eat("return")
+            if self.cur().kind == "," or self.cur().kind == "}":
+                # Empty return
+                return ReturnStmt(None, tok.pos, tok.line, tok.col)
+            else:
+                # Return with expression
+                e = self.parse_expr()
+                return ReturnStmt(e, tok.pos, tok.line, tok.col)
+        if self.cur().kind == "break":
+            tok = self.eat("break")
+            return BreakStmt(tok.pos, tok.line, tok.col)
+        if self.cur().kind == "continue":
+            tok = self.eat("continue")
+            return ContinueStmt(tok.pos, tok.line, tok.col)
+        # For other statements, fall back to regular parsing with semicolon-optional
+        stmt = self.parse_stmt(allow_no_semicolon=True)
+        return stmt
 
     def parse_match_pattern(self):
         """Parse one match arm pattern, including `|` alternatives and optional guard."""
@@ -1134,7 +1202,8 @@ class Parser:
             expr = CastExpr(expr, self.parse_type(), tok.pos, tok.line, tok.col)
         
         # Check for if expression (return if condition { true } else { false })
-        if self.opt("if") and self.cur().kind == "{":
+        if self.cur().kind == "if" and self.i + 1 < len(self.toks) and self.toks[self.i + 1].kind == "{":
+            self.eat("if")
             return self.parse_if_expression(expr)
         
         return expr
@@ -1291,18 +1360,22 @@ class Parser:
         return TryCatchStmt(try_body, catch_handlers, tok.pos, tok.line, tok.col)
 
     def parse_method_call(self, obj_expr: Any) -> Any:
-        """Parse method call syntax like obj.method(args)."""
+        """Parse method call syntax like obj.method(args) or field access like obj.field."""
         if self.opt("."):
             if self.cur().kind == "IDENT":
                 method_name = self.eat("IDENT").text
                 args = []
                 if self.opt("("):
+                    # This is a method call with arguments
                     while self.cur().kind != ")":
                         args.append(self.parse_expr())
                         if not self.opt(","):
                             break
                     self.eat(")")
-                return MethodCall(obj_expr, method_name, args, obj_expr.pos, obj_expr.line, obj_expr.col)
+                    return MethodCall(obj_expr, method_name, args, obj_expr.pos, obj_expr.line, obj_expr.col)
+                else:
+                    # This is a field access (for enum variants, struct fields, etc.)
+                    return FieldExpr(obj_expr, method_name, obj_expr.pos, obj_expr.line, obj_expr.col)
             else:
                 self._err("expected method name after '.'")
                 raise ParseError(self.errors[-1])

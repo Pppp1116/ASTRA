@@ -28,7 +28,7 @@ fn enhanced_heap_merge(heap1 Heap<T>, heap2 Heap<T>) Heap<T> {
     }
     
     // Build heap from combined data
-    heap_build_from_vec(result, result.data);
+    result = heap_build_from_vec(result, result.data);
     return result;
 }
 
@@ -78,7 +78,7 @@ fn enhanced_priority_queue_demo() Void {
     // Enhanced loop with inline mutable variable
     while mut value = int_priority_queue_pop(queue) {
         if value != none {
-            print("  Popped: " + str.to_string_int(value as Int?));
+            print("  Popped: " + str.to_string_int(value));
         }
         else {}
     }
@@ -259,9 +259,9 @@ fn median_finder_add(finder MedianFinder, value Int) Void {
 }
 
 fn median_finder_find_median(finder MedianFinder) Float? {
-    return 0.0;
+    return none;
 }
 
 fn heap_kth_smallest(data Vec<Int>, k Int) Int? {
-    return 0;
+    return none;
 }

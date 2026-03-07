@@ -27,8 +27,8 @@ fn stack_pop(stack Stack<T>) T? {
     }
     else {}
     result = stack.data[n - 1];
-    // Note: This is a simplified pop - in a real implementation
-    // we'd need a way to shrink the vector
+    // Remove the last element to shrink the vector
+    vec_remove(stack.data, n - 1);
     return result;
 }
 
@@ -114,6 +114,11 @@ struct RingBuffer<T> {
 
 /// Create a new ring buffer with `capacity`.
 fn ring_buffer_new(capacity Int) RingBuffer<T> {
+    if capacity <= 0 {
+        // Invalid capacity - would cause division by zero in operations
+        panic("Ring buffer capacity must be positive");
+    }
+    else {}
     data = vec_new() as Vec<T>;
     // Initialize with placeholder values
     mut i = 0;

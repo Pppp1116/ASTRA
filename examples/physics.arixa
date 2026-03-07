@@ -8,7 +8,7 @@ fn dot(a Vec2, b Vec2) Float{
 }
 
 fn len2(v Vec2) Float{
-    return dot(v, v);
+    return v.x * v.x + v.y * v.y;
 }
 
 fn classify_speed(v2 Float) Int{

@@ -14,8 +14,8 @@ class GlobalValueNumbering:
     
     def __init__(self, ctx: OptimizationContext):
         self.ctx = ctx
-        self.value_numbers: Dict[str, int] = {}
-        self.expressions: Dict[int, Any] = {}
+        self._value_numbers: Dict[str, int] = {}
+        self._expressions: Dict[int, Any] = {}
         self.next_value = 1
     
     def analyze_program(self, prog: Any) -> Any:

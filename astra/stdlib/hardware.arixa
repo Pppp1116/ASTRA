@@ -19,54 +19,7 @@ fn memory_barrier(barrier_type MemoryBarrier) {
 }
 
 /// Atomic memory operations without runtime dependencies.
-/// These use the built-in atomic operations but provide safer interfaces.
-
-/// Atomic compare-and-swap loop.
-///
-/// Returns the old value and whether the swap succeeded.
-fn atomic_compare_exchange_loop(ptr &mut Int, expected Int, desired Int) (Int, Bool) {
-    loop {
-        old_val = atomic_load(ptr);
-        if old_val == expected {
-            if atomic_compare_exchange(ptr, expected, desired) {
-                return (old_val, true);
-            }
-            else {}
-        }
-        else {
-            return (old_val, false);
-        }
-        expected = old_val;
-    }
-}
-
-/// Atomic fetch-add with overflow checking.
-///
-/// Returns `none` on overflow.
-fn atomic_fetch_add_checked(ptr &mut Int, delta Int) Int? {
-    current = atomic_load(ptr);
-    if delta > 0 && current > maxVal(Int) - delta {
-        return none;
-    }
-    else {}
-    if delta < 0 && current < minVal(Int) - delta {
-        return none;
-    }
-    else {}
-    return atomic_fetch_add(ptr, delta);
-}
-
-/// Spin-wait until `condition` becomes true or `timeout` cycles pass.
-///
-/// Returns true if condition was met, false if timeout occurred.
-fn spin_wait(condition fn() Bool, timeout Int) Bool {
-    mut cycles = 0;
-    while !condition() && cycles < timeout {
-        memory_barrier(MEMORY_BARRIER_READ);
-        cycles += 1;
-    }
-    return condition();
-}
+/// Note: For full atomic operations, use std.atomic instead.
 
 /// CPU pause instruction to yield in spin loops.
 fn cpu_pause() {
@@ -148,8 +101,18 @@ fn modify_reg(addr &mut Int, mask Int, value Int) {
 
 /// Wait for a register field to match `expected` with timeout.
 fn wait_for_reg_field(addr &Int, mask Int, expected Int, timeout Int) Bool {
-    return spin_wait(fn() {
+    start = __monotonic_ms();
+    while __monotonic_ms() - start < timeout {
         current = read_reg(addr);
-        return (current & mask) == expected;
-    }, timeout);
+        if (current & mask) == expected {
+            return true;
+        }
+        else {}
+        __sleep_ms(1);
+    }
+    return false;
 }
+
+// Runtime helper declarations
+extern fn __monotonic_ms() Int;
+extern fn __sleep_ms(ms Int) Void;

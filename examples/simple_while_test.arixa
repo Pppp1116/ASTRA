@@ -1,8 +1,10 @@
 // Test enhanced while loop syntax - simpler
+import std.str;
+
 fn main() Int {
     mut i = 0;
     while i < 5 {
-        print("Count: " + str.to_string_int(i));
+        print("Count: " + to_string_int(i));
         i += 1;
     }
     

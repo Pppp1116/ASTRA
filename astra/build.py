@@ -917,6 +917,7 @@ def build(
     Returns:
         Value produced by the routine, if any.
     """
+    import sys
     src_file = Path(src_path)
     if kind not in {"exe", "lib"}:
         raise RuntimeError(f"BUILD {src_file}:1:1: unsupported build kind {kind}")

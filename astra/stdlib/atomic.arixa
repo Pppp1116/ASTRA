@@ -13,21 +13,21 @@ fn atomic_int_new(v Int) AtomicInt{
 
 /// Load current value.
 fn atomic_load(a &AtomicInt) Int{
-    return __atomic_load(a.handle);
+    return __atomic_load(a.handle as Int);
 }
 
 /// Store value.
 fn atomic_store(a &mut AtomicInt, v Int) Int{
-    return __atomic_store(a.handle, v);
+    return __atomic_store(a.handle as Int, v);
 }
 
 /// Add `delta`, returning previous value.
 fn atomic_fetch_add(a &mut AtomicInt, delta Int) Int{
-    return __atomic_fetch_add(a.handle, delta);
+    return __atomic_fetch_add(a.handle as Int, delta);
 }
 
 /// Compare-and-swap.
 /// Returns true when swap occurred.
 fn atomic_compare_exchange(a &mut AtomicInt, expected Int, desired Int) Bool{
-    return __atomic_compare_exchange(a.handle, expected, desired);
+    return __atomic_compare_exchange(a.handle as Int, expected, desired);
 }

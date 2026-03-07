@@ -26,7 +26,7 @@ fn digest_pair(a String, b String) String{
 fn rand_bytes(len i32) Vec<u8> | CryptoError{
     out = __rand_bytes(len);
     if out == none {
-        return CryptoError("rand_bytes failed", 1);
+        return CryptoError("rand_bytes failed", 1 as i32);
     }
     else {}
     return out as Vec<u8>;

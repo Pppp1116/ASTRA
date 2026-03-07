@@ -6,7 +6,7 @@ import std.math;
 
 // Enhanced loop syntax tests
 fn test_enhanced_loops() Void {
-    data = vec_new() as Vec<Int>;
+    mut data = vec_new() as Vec<Int>;
     vec_push(data, 1);
     vec_push(data, 2);
     vec_push(data, 3);
@@ -17,7 +17,8 @@ fn test_enhanced_loops() Void {
     
     // Test 1: Enhanced while loop with inline mutable variable
     print("Test 1: Enhanced while loop");
-    while mut i < vec_len(data) {
+    mut i = 0;
+    while i < vec_len(data) {
         item = vec_get(data, i);
         if item != none {
             print("  Item " + str.to_string_int(i) + ": " + str.to_string_int(item as Int?));

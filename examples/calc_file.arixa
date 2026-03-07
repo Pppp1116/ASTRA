@@ -1,10 +1,10 @@
 import std.io;
 
 fn main() Int{
-    text = std.io.read_or("input.txt", "6 7\\\\n");
+    text = read_or("input.txt", "6 7\\n");
     out = "Loaded bytes: ";
     n = len(text);
-    std.io.write("output.txt", out + __to_json(n));
+    write("output.txt", out + __to_json(n));
     print("wrote output.txt");
     return 0;
 }

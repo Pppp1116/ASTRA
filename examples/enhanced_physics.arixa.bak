@@ -2,6 +2,7 @@
 // This is how physics.arixa would look with proposed syntax enhancements
 
 import std.math;
+import std.str;
 
 // Enhanced struct definition (shorthand constructor available)
 struct Vec2 {

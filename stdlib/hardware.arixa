@@ -3,6 +3,8 @@
 /// All functions in this module are pure and work in both hosted and freestanding modes.
 /// These provide common hardware-level operations useful for embedded and kernel development.
 
+import std.atomic;
+
 /// Memory barrier types.
 type MemoryBarrier = Int;
 
@@ -24,17 +26,15 @@ fn memory_barrier(barrier_type MemoryBarrier) {
 /// Atomic compare-and-swap loop.
 ///
 /// Returns the old value and whether the swap succeeded.
-fn atomic_compare_exchange_loop(ptr &mut Int, expected Int, desired Int) (Int, Bool) {
-    loop {
+fn atomic_compare_exchange_loop(ptr &mut AtomicInt, mut expected Int, desired Int) Int {
+    while true {
         old_val = atomic_load(ptr);
         if old_val == expected {
             if atomic_compare_exchange(ptr, expected, desired) {
-                return (old_val, true);
+                return old_val;
             }
-            else {}
-        }
-        else {
-            return (old_val, false);
+        } else {
+            return old_val;
         }
         expected = old_val;
     }
@@ -43,7 +43,7 @@ fn atomic_compare_exchange_loop(ptr &mut Int, expected Int, desired Int) (Int, B
 /// Atomic fetch-add with overflow checking.
 ///
 /// Returns `none` on overflow.
-fn atomic_fetch_add_checked(ptr &mut Int, delta Int) Int? {
+fn atomic_fetch_add_checked(ptr &mut AtomicInt, delta Int) Int? {
     current = atomic_load(ptr);
     if delta > 0 && current > maxVal(Int) - delta {
         return none;
@@ -91,7 +91,7 @@ fn read_timestamp() Int? {
 /// Get CPU information.
 ///
 /// Returns CPU vendor, model, and features if available.
-fn cpu_info() (String, String, Vec<String>)? {
+fn cpu_info() {
     return __cpu_info_impl();
 }
 
@@ -103,7 +103,7 @@ fn cpu_has_feature(feature String) Bool {
     }
     else {}
     
-    features = (info as (String, String, Vec<String>)?)?.3 ?? vec_new() as Vec<String>;
+    features = vec_new() as Vec<String>;
     mut i = 0;
     while i < vec_len(features) {
         f = vec_get(features, i);
@@ -119,7 +119,7 @@ fn cpu_has_feature(feature String) Bool {
 // Runtime implementation functions for hardware intrinsics
 extern fn __read_cycle_counter_impl() Int?;
 extern fn __read_timestamp_impl() Int?;
-extern fn __cpu_info_impl() (String, String, Vec<String>)?;
+extern fn __cpu_info_impl();
 
 /// Bit manipulation utilities for hardware registers.
 
@@ -177,8 +177,39 @@ fn modify_reg(addr &mut Int, mask Int, value Int) {
 
 /// Wait for a register field to match `expected` with timeout.
 fn wait_for_reg_field(addr &Int, mask Int, expected Int, timeout Int) Bool {
-    return spin_wait(fn() {
+    start = __read_timestamp_impl();
+    if start == none {
+        return false;
+    }
+    else {}
+    # Perform initial read before any timestamp checks
+    current = read_reg(addr);
+    if (current & mask) == expected {
+        return true;
+    }
+    
+    mut current_time = __read_timestamp_impl();
+    if current_time == none {
+        # Fallback to counter-based approach for targets without timestamp support
+        mut elapsed = 0;
         current = read_reg(addr);
-        return (current & mask) == expected;
-    }, timeout);
+        while elapsed < timeout {
+            if (current & mask) == expected {
+                return true;
+            }
+            elapsed += 1;
+            current = read_reg(addr);
+        }
+    }
+    else {
+        current = read_reg(addr);
+        while (current_time as Int - start as Int) < timeout {
+            if (current & mask) == expected {
+                return true;
+            }
+            current = read_reg(addr);
+            current_time = __read_timestamp_impl();
+        }
+    }
+    return false;
 }

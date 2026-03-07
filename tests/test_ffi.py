@@ -73,7 +73,7 @@ def test_llvm_codegen_emits_declare_for_extern():
     src = "extern fn foo(x i32) i32; fn main() Int{ return foo(1i32); }"
     prog = parse(src)
     ir = to_llvm_ir(prog, filename="<mem>")
-    assert "declare i32 @foo(i32)" in ir
+    assert "declare signext i32 @foo(i32 signext)" in ir
     assert "define i32 @foo(" not in ir
 
 

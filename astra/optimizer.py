@@ -911,7 +911,7 @@ def _dse_stmts(stmts: list[Any], live_out: set[str]) -> tuple[list[Any], set[str
             if st.name not in live:
                 if _is_discardable_expr(st.expr):
                     continue
-                out_rev.append(ExprStmt(expr=st.expr, pos=st.pos, line=st.line, col=st.col))
+                out_rev.append(st)
                 live |= uses
                 continue
             out_rev.append(st)
@@ -922,7 +922,9 @@ def _dse_stmts(stmts: list[Any], live_out: set[str]) -> tuple[list[Any], set[str
             if isinstance(st.target, Name) and st.op == "=" and st.target.value not in live:
                 if _is_discardable_expr(st.expr):
                     continue
-                out_rev.append(ExprStmt(expr=st.expr, pos=st.pos, line=st.line, col=st.col))
+                # Keep AssignStmt as-is instead of converting to ExprStmt
+                # Converting to ExprStmt breaks variable assignments in generated code
+                out_rev.append(st)
                 live |= _used_names_expr(st.expr)
                 continue
             out_rev.append(st)

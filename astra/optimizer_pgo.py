@@ -10,6 +10,9 @@ from pathlib import Path
 from astra.ast import *
 from astra.optimizer_enhanced import OptimizationContext
 
+# Threshold for identifying hot functions - used across the optimizer
+HOT_FUNCTION_CALL_THRESHOLD = 1000
+
 
 @dataclass
 class ProfileData:
@@ -89,30 +92,38 @@ class HotPathOptimizer:
         """Optimize hot paths based on profile data."""
         # Identify hot functions
         hot_functions = self._get_hot_functions()
+        print(f"DEBUG: Hot functions identified: {hot_functions}")
         
         # Apply aggressive optimizations to hot functions
         for item in prog.items:
             if isinstance(item, FnDecl) and item.name in hot_functions:
+                print(f"DEBUG: Optimizing hot function: {item.name}")
                 self._optimize_hot_function(item)
         
         return prog
     
     def _get_hot_functions(self) -> Set[str]:
         """Get hot functions from profile data."""
-        # Consider functions with > 1000 calls as hot
-        return {name for name, count in self.profile_data.function_counts.items() if count > 1000}
+        # Consider functions with >= HOT_FUNCTION_CALL_THRESHOLD calls as hot
+        return {name for name, count in self.profile_data.function_counts.items() if count >= HOT_FUNCTION_CALL_THRESHOLD}
     
     def _optimize_hot_function(self, fn: FnDecl) -> None:
         """Apply aggressive optimizations to a hot function."""
         # Mark function for aggressive optimization
+        print(f"DEBUG: Marking function {fn.name} as hot")
         setattr(fn, "_hot_function", True)
         setattr(fn, "_call_count", self.profile_data.function_counts.get(fn.name, 0))
         
         # Optimize loops in hot functions
+        print(f"DEBUG: Optimizing loops in {fn.name}")
         fn.body = self._optimize_hot_loops(fn.body)
         
         # Optimize branches in hot functions
+        print(f"DEBUG: Optimizing branches in {fn.name}")
         fn.body = self._optimize_hot_branches(fn.body)
+        
+        print(f"DEBUG: Final optimized body for {fn.name}: {len(fn.body) if hasattr(fn.body, '__len__') else 'N/A'}")
+        return fn
     
     def _optimize_hot_loops(self, stmts: List[Any]) -> List[Any]:
         """Optimize loops in hot functions."""
@@ -287,7 +298,7 @@ class InlineDecisionMaker:
         call_count = self.profile_data.function_counts.get(fn.name, 0)
         
         # Inline small hot functions aggressively
-        if call_count > 1000 and len(fn.body) <= 5:
+        if call_count >= HOT_FUNCTION_CALL_THRESHOLD and len(fn.body) <= 5:
             setattr(fn, "_force_inline", True)
         
         # Don't inline large cold functions

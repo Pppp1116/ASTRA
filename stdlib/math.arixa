@@ -2,6 +2,8 @@
 ///
 /// These utilities are pure and valid in both hosted and freestanding modes.
 
+import std.algorithm;
+
 /// Return the smaller of two integers.
 fn min_int(a Int, b Int) Int{
     if a < b {
@@ -270,8 +272,8 @@ fn tanh(x Float) Float {
 
 /// Calculate mean of integer array.
 /// Returns `none` if array is empty.
-fn mean_int(data Vec<Int>) Float? {
-    n = vec_len(data);
+fn mean_int(data &Vec<Int>) Float? {
+    n = vec_len(*data);
     if n == 0 {
         return none;
     }
@@ -280,9 +282,9 @@ fn mean_int(data Vec<Int>) Float? {
     mut sum = 0;
     mut i = 0;
     while i < n {
-        val = vec_get(data, i);
+        val = vec_get(*data, i);
         if val != none {
-            sum += (val as Int?);
+            sum += (val as Int);
         }
         else {}
         i += 1;
@@ -306,14 +308,14 @@ fn median_int(data Vec<Int>) Float? {
     while i < n {
         val = vec_get(data, i);
         if val != none {
-            vec_push(sorted, (val as Int?));
+            vec_push(sorted, (val as Int));
         }
         else {}
         i += 1;
     }
     
     // Sort the array (using a simple bubble sort for now)
-    bubble_sort_int(sorted);
+    bubble_sort_int(&sorted);
     
     if n % 2 == 1 {
         // Odd number of elements
@@ -331,7 +333,7 @@ fn median_int(data Vec<Int>) Float? {
         val2 = vec_get(sorted, n / 2);
         
         if val1 != none && val2 != none {
-            return ((val1 as Int?) + (val2 as Int?)) as Float / 2.0;
+            return ((val1 as Int) + (val2 as Int)) as Float / 2.0;
         }
         else {
             return none;
@@ -342,7 +344,7 @@ fn median_int(data Vec<Int>) Float? {
 /// Calculate standard deviation of integer array.
 /// Returns `none` if array is empty.
 fn std_dev_int(data Vec<Int>) Float? {
-    mean = mean_int(data);
+    mean = mean_int(&data);
     if mean == none {
         return none;
     }
@@ -359,7 +361,7 @@ fn std_dev_int(data Vec<Int>) Float? {
     while i < n {
         val = vec_get(data, i);
         if val != none {
-            diff = (val as Int?) as Float - (mean as Float?);
+            diff = (val as Int) as Float - (mean as Float);
             sum_sq_diff += diff * diff;
         }
         else {}

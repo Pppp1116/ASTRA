@@ -1100,7 +1100,7 @@ def test_semantic_rejects_static_negative_shift_count():
         analyze(parse(src))
         assert False
     except SemanticError as e:
-        assert "shift count -1 out of range for Int in >>" in str(e)
+        assert "negative shift count -1 in >>" in str(e)
 
 
 def test_semantic_rejects_bit_intrinsics_on_non_integer_type():

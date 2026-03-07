@@ -1,8 +1,10 @@
 // Test enhanced for loop syntax
+import std.str;
+
 fn main() Int {
     // Test enhanced for loop with initialization
     for mut i = 0; i < 5; i += 1 {
-        print("Count: " + str.to_string_int(i));
+        print("Count: " + to_string_int(i));
     }
     
     return 0;

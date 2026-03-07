@@ -188,6 +188,10 @@ def _fmt_expr(e, cfg: FormatConfig, *, indent: int = 0) -> str:
         return f"size_of({_fmt_expr(e.expr, cfg, indent=indent)})"
     if isinstance(e, AlignOfValueExpr):
         return f"align_of({_fmt_expr(e.expr, cfg, indent=indent)})"
+    if isinstance(e, MethodCall):
+        obj = _fmt_expr_with_prec(e.obj, cfg, _PREC_POSTFIX)
+        args = [_fmt_expr(a, cfg, indent=indent + 1) for a in e.args]
+        return _wrap_call_like(f"{obj}.{e.method}", args, cfg, indent=indent)
     raise ValueError(f"formatter: unsupported expression node {type(e).__name__}")
 
 

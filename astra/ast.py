@@ -258,6 +258,21 @@ class TypeAliasDecl:
 
 
 @dataclass
+class ConstDecl:
+    """AST node representing const decl.
+    
+    This type is part of Astra's public compiler/tooling surface.
+    """
+    name: str
+    expr: Any
+    pub: bool = False
+    doc: str = ""
+    pos: int = 0
+    line: int = 0
+    col: int = 0
+
+
+@dataclass
 class TraitDecl:
     """AST node representing trait declaration."""
     name: str

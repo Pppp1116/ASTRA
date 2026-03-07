@@ -4,9 +4,7 @@
 /// capabilities. Requires runtime support and filesystem access.
 
 import std.io;
-import std.fs;
 import std.time;
-import std.env;
 
 /// Log levels in order of severity
 type LogLevel = Int;
@@ -431,10 +429,13 @@ fn write_to_log_file(handle *Void, content String) {
 
 fn get_log_file_path() String {
     // Try to get log directory from environment
-    log_dir = env.get_var("LOG_DIR");
-    if log_dir == none {
-        log_dir = env.temp_dir();
-    }
+    // log_dir = env.get_var("LOG_DIR");
+    // if log_dir == none {
+    //     log_dir = env.temp_dir();
+    // }
+    
+    // Use default log directory
+    log_dir = "/tmp";
     
     // Generate filename with timestamp
     timestamp = time.now_ms();

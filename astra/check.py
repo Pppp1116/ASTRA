@@ -822,6 +822,13 @@ def _suggestions_for(
     if "requires unsafe context" in m:
         out.append(DiagSuggestion(message="wrap this operation in an `unsafe { ... }` block after validating the safety requirements"))
 
+    if "non-exhaustive" in m and "match" in m and "enum" in m:
+        non_exhaustive_enum = _NON_EXHAUSTIVE_ENUM_RE.match(message)
+        if non_exhaustive_enum is not None:
+            out.append(DiagSuggestion(message="add a match arm for the remaining enum variants, or add a wildcard `_` arm"))
+        else:
+            out.append(DiagSuggestion(message="add a match arm for the remaining enum variants, or add a wildcard `_` arm"))
+
     return out
 
 

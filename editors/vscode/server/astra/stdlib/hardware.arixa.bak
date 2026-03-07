@@ -25,10 +25,11 @@ fn memory_barrier(barrier_type MemoryBarrier) {
 ///
 /// Returns the old value and whether the swap succeeded.
 fn atomic_compare_exchange_loop(ptr &mut Int, expected Int, desired Int) (Int, Bool) {
+    mut current_expected = expected;
     loop {
         old_val = atomic_load(ptr);
-        if old_val == expected {
-            if atomic_compare_exchange(ptr, expected, desired) {
+        if old_val == current_expected {
+            if atomic_compare_exchange(ptr, current_expected, desired) {
                 return (old_val, true);
             }
             else {}
@@ -36,7 +37,7 @@ fn atomic_compare_exchange_loop(ptr &mut Int, expected Int, desired Int) (Int, B
         else {
             return (old_val, false);
         }
-        expected = old_val;
+        current_expected = old_val;
     }
 }
 
@@ -44,16 +45,28 @@ fn atomic_compare_exchange_loop(ptr &mut Int, expected Int, desired Int) (Int, B
 ///
 /// Returns `none` on overflow.
 fn atomic_fetch_add_checked(ptr &mut Int, delta Int) Int? {
-    current = atomic_load(ptr);
-    if delta > 0 && current > maxVal(Int) - delta {
-        return none;
+    loop {
+        current = atomic_load(ptr);
+        // Check for overflow with the freshly read current value before computing new_val
+        if delta > 0 && current > maxVal(Int) - delta {
+            return none;
+        }
+        else {}
+        if delta < 0 && current < minVal(Int) - delta {
+            return none;
+        }
+        else {}
+        // Only compute new_val after overflow checks pass
+        new_val = current + delta;
+        // Try to atomically replace current with new_val
+        if atomic_compare_exchange(ptr, current, new_val) {
+            return current;
+        }
+        else {
+            // CAS failed, retry with new current value
+            continue;
+        }
     }
-    else {}
-    if delta < 0 && current < minVal(Int) - delta {
-        return none;
-    }
-    else {}
-    return atomic_fetch_add(ptr, delta);
 }
 
 /// Spin-wait until `condition` becomes true or `timeout` cycles pass.

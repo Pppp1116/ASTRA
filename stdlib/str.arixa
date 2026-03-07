@@ -34,17 +34,6 @@ fn parse_int(s String) Int{
     return __from_json(s) as Int;
 }
 
-/// Get character at index in string.
-///
-/// Returns the character at the given byte index.
-/// Note: This operates on bytes, not Unicode code points.
-fn char_at(s String, index Int) Char {
-    if index < 0 || index >= len(s) {
-        return '\0';
-    }
-    return __str_char_at_impl(s, index);
-}
-
 /// Create string from a single character.
 fn from_char(c Char) String {
     return __str_from_char_impl(c);
@@ -59,7 +48,7 @@ fn substring(s String, start Int, length Int) String {
         return "";
     }
     
-    end = start + length;
+    mut end = start + length;
     if end > len(s) {
         end = len(s);
     }

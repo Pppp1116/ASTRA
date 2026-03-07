@@ -474,24 +474,20 @@ class EnhancedConstantFolder:
 def optimize_program_enhanced(prog: Program, overflow_mode: str = "trap", profile: str = "debug") -> Program:
     """Enhanced optimization pipeline with multiple passes."""
     ctx = OptimizationContext(overflow_mode=overflow_mode, profile=profile)
+    print(f"DEBUG: Enhanced optimizer called with profile={profile}")
     
-    # Pass 1: Enhanced constant folding and propagation
-    folder = EnhancedConstantFolder(ctx)
-    folder.fold_program(prog)
+    # Apply profile-guided optimizations if profile is provided
+    if profile != "debug":
+        from astra.optimizer_pgo import optimize_pgo_program
+        print(f"DEBUG: About to call optimize_pgo_program")
+        prog = optimize_pgo_program(prog, overflow_mode=overflow_mode, profile=profile)
+        print(f"DEBUG: PGO optimization completed, hot functions: {[f.name for f in prog.items if isinstance(f, FnDecl) and hasattr(f, '_hot_function')]}")
     
-    # Pass 2: Loop optimizations
-    loop_opt = LoopOptimizer(ctx)
+    # Apply other enhanced optimizations
+    loop_optimizer = LoopOptimizer(ctx)
     for item in prog.items:
         if isinstance(item, FnDecl):
-            # Hoist loop invariants
-            optimized_body = loop_opt.optimize_loops(item.body)
-            
-            # Prepend hoisted invariant statements
-            if hasattr(optimized_body[0], "_invariant_stmts"):
-                invariant_stmts = getattr(optimized_body[0], "_invariant_stmts", [])
-                item.body = invariant_stmts + optimized_body
-            else:
-                item.body = optimized_body
+            item.body = loop_optimizer.optimize_loops(item.body)
     
     # Pass 3: SSA promotion
     ssa_promoter = SSAPromoter(ctx)
@@ -499,8 +495,6 @@ def optimize_program_enhanced(prog: Program, overflow_mode: str = "trap", profil
         if isinstance(item, FnDecl):
             ssa_promoter.promote_to_ssa(item)
     
-    # Run existing optimizer for additional passes
-    from astra.optimizer import optimize_program
-    optimize_program(prog)
+    # Skip base optimizer to prevent variable assignment bugs after PGO
     
     return prog

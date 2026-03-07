@@ -1,8 +1,21 @@
-fn add(a Int, b Int) Int { return a + b; }
-fn multiply(x Float, y Float) Float { return x * y; }
-fn void_func() Void { return; }
-fn implicit_void() { }
-fn double(x Int) Int { return x * 2; }
+fn add(a Int, b Int) Int {
+    return a + b;
+}
+
+fn multiply(x Float, y Float) Float {
+    return x * y;
+}
+
+fn void_func() {
+    return;
+}
+
+fn implicit_void() {}
+
+fn double(x Int) Int {
+    return x * 2;
+}
+
 fn main() Int {
     result1 = add(5, 3);
     result2 = multiply(2.5, 4.0);

@@ -332,8 +332,8 @@ fn fibonacci(n Int) Int {
 
 fn compute_heavy() Int {
     mut result = 0;
-    i = 0;
-    while i < 100 {
+    mut i = 0;
+    while i < 4 {  // Reduced from 100 to keep result in valid exit code range
         result = result + fibonacci(10);
         i = i + 1;
     }
@@ -364,7 +364,7 @@ fn main() Int {
     
     # Both should produce the same result
     assert cp_debug.returncode == cp_release.returncode
-    assert cp_debug.returncode == 5500  # 100 * fibonacci(10) = 100 * 55
+    assert cp_debug.returncode == 220  # 4 * fibonacci(10) = 4 * 55
     
     print(f"Debug time: {debug_time:.4f}s")
     print(f"Release time: {release_time:.4f}s")

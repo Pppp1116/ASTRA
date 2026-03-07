@@ -22,9 +22,12 @@ fn digest_pair(a String, b String) String{
 
 /// Return random bytes.
 ///
-/// Placeholder branch shape follows union-based error model.
-fn rand_bytes(len i32) Vec<u8> | CryptoError{
-    out = __rand_bytes(len);
+/// Generate cryptographically secure random bytes.
+fn rand_bytes(length i32) Vec<u8> | CryptoError{
+    if length < 0 {
+        return CryptoError("rand_bytes: negative length", 1);
+    }
+    out = __rand_bytes(length);
     if out == none {
         return CryptoError("rand_bytes failed", 1);
     }

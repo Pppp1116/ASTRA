@@ -30,6 +30,7 @@ from astra.build import (
 from astra.parser import parse
 from astra.semantic import analyze
 from astra.for_lowering import lower_for_loops
+from astra.gpu.kernel_lowering import lower_gpu_kernels
 from astra.comptime import run_comptime
 from astra.codegen import to_python
 from astra.optimizer_enhanced import optimize_program_enhanced
@@ -39,8 +40,9 @@ from astra.llvm_codegen_enhanced import to_llvm_ir_enhanced
 class EnhancedBuildPipeline:
     """Enhanced build pipeline with optimization support."""
     
-    def __init__(self):
-        self.build = None
+    def __init__(self, profile: str = "debug", overflow_mode: str = "debug"):
+        self.profile = profile
+        self.overflow_mode = overflow_mode
     
     def build(
         self,
@@ -56,6 +58,15 @@ class EnhancedBuildPipeline:
         sanitize: str | None = None,
         triple: str | None = None,
         links: list[str] | None = None,
+    ) -> str:
+        """Enhanced build pipeline with optimization support."""
+        src_file = Path(src_path)
+        overflow_mode = overflow
+        digest = hashlib.sha256(src_file.read_text().encode()).hexdigest()
+        cache_key = (
+            f"{src_file.resolve().as_posix()}::{target}::{kind}::{int(bool(strict))}::{int(bool(freestanding))}::"
+            f"{int(bool(emit_ir))}::{profile}::{overflow_mode}::{sanitize or ''}::{triple or ''}::{','.join(sorted(set(links or [])))}"
+        )
         cache = json.loads(CACHE.read_text()) if CACHE.exists() else {}
         if cache.get(cache_key) == digest and Path(out_path).exists():
             return 'cached'

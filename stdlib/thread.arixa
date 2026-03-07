@@ -3,12 +3,12 @@
 /// This module uses the hosted runtime task API. Task IDs are integer handles.
 
 /// Spawn a zero-argument task and return its task ID.
-fn spawn0(task fn() Int) Int{
+fn spawn0(task Any) Int{
     return spawn(task);
 }
 
 /// Spawn a one-argument integer task and return its task ID.
-fn spawn1(task fn(Int) Int, arg Int) Int{
+fn spawn1(task Any, arg Int) Int{
     return spawn(task, arg);
 }
 
