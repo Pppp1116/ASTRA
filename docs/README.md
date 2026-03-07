@@ -6,6 +6,7 @@
 
 ## Language Reference
 - [Language Specification](language/specification.md) - Complete language definition
+- [Language Tour](language/tour.md) - Interactive tutorial with examples
 - [Syntax Guide](language/syntax.md)
 - [Type System](language/types.md)
 - [Memory Model](language/memory_model.md)
@@ -59,6 +60,11 @@
 ## Internal Documentation
 - [Architecture Inconsistencies](internal/architecture_inconsistencies.md)
 - [Development Summaries](internal/development_summaries/) - Historical notes and implementation details
+
+## Archived Documentation
+- [Old Language Specification](archive/old_language_spec.md) - Superseded language spec
+- [Old Syntax Book](archive/old_syntax_book.md) - Outdated syntax reference  
+- [Old Reference Manual](archive/old_reference_manual.md) - Deprecated CLI reference
 
 ## Project Information
 - [Contributing](development/contributing.md)
