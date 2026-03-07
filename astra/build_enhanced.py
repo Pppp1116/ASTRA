@@ -37,53 +37,25 @@ from astra.llvm_codegen_enhanced import to_llvm_ir_enhanced
 
 
 class EnhancedBuildPipeline:
-    """Enhanced build pipeline with aggressive optimizations."""
+    """Enhanced build pipeline with optimization support."""
     
-    def __init__(self, profile: str = "debug", overflow_mode: str = "trap"):
-        self.profile = profile
-        self.overflow_mode = overflow_mode
-        self.release_mode = profile == "release"
-        self.optimization_level = 3 if self.release_mode else 0
+    def __init__(self):
+        self.build = None
     
     def build(
         self,
         src_path: str,
         out_path: str,
-        target: str = 'py',
+        target: str = "py",
         kind: str = "exe",
-        emit_ir: str | None = None,
+        emit_ir: bool = False,
         strict: bool = False,
         freestanding: bool = False,
         profile: str = "debug",
-        overflow: str = "debug",
+        overflow: str = "trap",
         sanitize: str | None = None,
         triple: str | None = None,
         links: list[str] | None = None,
-    ) -> str:
-        """Enhanced build with comprehensive optimization pipeline."""
-        src_file = Path(src_path)
-        
-        # Validate inputs
-        if kind not in {"exe", "lib"}:
-            raise RuntimeError(f"BUILD {src_file}:1:1: unsupported build kind {kind}")
-        if profile not in {"debug", "release"}:
-            raise RuntimeError(f"BUILD {src_file}:1:1: unsupported profile {profile}")
-        if sanitize not in {None, "address", "undefined", "thread"}:
-            raise RuntimeError(f"BUILD {src_file}:1:1: unsupported sanitizer {sanitize}")
-        if sanitize is not None and target != "native":
-            raise RuntimeError(f"BUILD {src_file}:1:1: sanitizer requires --target native")
-        if sanitize is not None and freestanding:
-            raise RuntimeError(f"BUILD {src_file}:1:1: sanitizer is unsupported with --freestanding")
-        
-        overflow_mode = _resolve_overflow_mode(profile, overflow, check=False)
-        
-        # Check cache
-        digest = self._build_fingerprint_enhanced(
-            src_file, target, kind, emit_ir, strict, freestanding,
-            profile, overflow_mode, sanitize, triple, links
-        )
-        cache_key = self._get_cache_key(src_file, target, kind, strict, freestanding,
-                                      emit_ir, profile, overflow_mode, sanitize, triple, links)
         cache = json.loads(CACHE.read_text()) if CACHE.exists() else {}
         if cache.get(cache_key) == digest and Path(out_path).exists():
             return 'cached'

@@ -218,7 +218,7 @@ def main(argv=None):
     b.add_argument("--emit-ir")
     b.add_argument("--strict", action="store_true")
     b.add_argument("--freestanding", action="store_true")
-    b.add_argument("--profile", choices=["debug", "release"], default="debug")
+    b.add_argument("--profile", choices=["debug", "release", "experimental", "beta"], default="debug")
     b.add_argument("--overflow", choices=["trap", "wrap", "debug"], default="debug")
     b.add_argument("--sanitize", choices=["address", "undefined", "thread"])
     b.add_argument("--triple")

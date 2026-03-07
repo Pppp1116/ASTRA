@@ -1041,6 +1041,37 @@ def build(
         except ImportError:
             # Fallback to original optimizer if enhanced not available
             optimize_program(prog)
+    elif profile in {"experimental", "beta"}:
+        # Experimental/beta mode with cutting-edge optimizations
+        try:
+            from astra.optimizer_experimental import optimize_experimental_program
+            
+            print("OPTIMIZE: Using experimental optimization pipeline (beta mode)")
+            optimize_experimental_program(prog, overflow_mode=overflow_mode, profile=profile)
+        except ImportError:
+            # Fallback to release optimizations
+            try:
+                from astra.optimizer_enhanced import optimize_program_enhanced
+                from astra.optimizer_advanced import optimize_program_advanced
+                from astra.optimizer_memory import optimize_memory_program
+                from astra.optimizer_controlflow import optimize_controlflow_program
+                from astra.optimizer_ssa import optimize_ssa_program
+                from astra.optimizer_loops_advanced import optimize_loops_advanced_program
+                from astra.optimizer_interprocedural import optimize_interprocedural_program
+                from astra.optimizer_target_specific import optimize_target_specific_program
+                from astra.optimizer_pgo import optimize_pgo_program
+                
+                optimize_program_enhanced(prog, overflow_mode=overflow_mode, profile=profile)
+                optimize_program_advanced(prog, overflow_mode=overflow_mode, profile=profile)
+                optimize_memory_program(prog, overflow_mode=overflow_mode, profile=profile)
+                optimize_controlflow_program(prog, overflow_mode=overflow_mode, profile=profile)
+                optimize_ssa_program(prog, overflow_mode=overflow_mode, profile=profile)
+                optimize_loops_advanced_program(prog, overflow_mode=overflow_mode, profile=profile)
+                optimize_interprocedural_program(prog, overflow_mode=overflow_mode, profile=profile)
+                optimize_target_specific_program(prog, overflow_mode=overflow_mode, profile=profile, triple=triple)
+                optimize_pgo_program(prog, overflow_mode=overflow_mode, profile=profile)
+            except ImportError:
+                optimize_program(prog)
     else:
         optimize_program(prog)
     if strict:
