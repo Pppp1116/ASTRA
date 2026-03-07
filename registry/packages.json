@@ -2,31 +2,258 @@
   "c": {
     "repo": "https://github.com/Pppp1116/astra-libc",
     "description": "C standard library bindings",
-    "version": "1.0.0"
+    "version": "1.0.0",
+    "license": "MIT",
+    "authors": ["ASTRA Team"],
+    "homepage": "https://astra-lang.org",
+    "keywords": ["c", "ffi", "bindings", "libc"],
+    "categories": ["FFI", "System"],
+    "dependencies": {},
+    "targets": {
+      "freestanding": true,
+      "hosted": true
+    },
+    "features": {
+      "default": ["stdio"],
+      "stdio": [],
+      "stdlib": ["stdio"],
+      "string": ["stdlib"]
+    }
   },
   "curl": {
     "repo": "https://github.com/Pppp1116/astra-curl",
-    "description": "libcurl bindings",
-    "version": "8.7.1"
+    "description": "libcurl bindings for HTTP requests",
+    "version": "8.7.1",
+    "license": "MIT",
+    "authors": ["ASTRA Team"],
+    "homepage": "https://astra-lang.org",
+    "keywords": ["http", "curl", "networking", "web"],
+    "categories": ["Networking", "Web"],
+    "dependencies": {
+      "c": "1.0.0"
+    },
+    "targets": {
+      "freestanding": false,
+      "hosted": true
+    },
+    "features": {
+      "default": ["http"],
+      "http": ["c"],
+      "https": ["http"],
+      "ftp": ["http"]
+    }
   },
   "opengl": {
     "repo": "https://github.com/Pppp1116/astra-opengl",
-    "description": "OpenGL bindings",
-    "version": "4.6.0"
+    "description": "OpenGL graphics library bindings",
+    "version": "4.6.0",
+    "license": "MIT",
+    "authors": ["ASTRA Team"],
+    "homepage": "https://astra-lang.org",
+    "keywords": ["graphics", "opengl", "3d", "rendering"],
+    "categories": ["Graphics", "3D"],
+    "dependencies": {
+      "c": "1.0.0"
+    },
+    "targets": {
+      "freestanding": false,
+      "hosted": true,
+      "gpu": true
+    },
+    "features": {
+      "default": ["core"],
+      "core": ["c"],
+      "shaders": ["core"],
+      "textures": ["core"],
+      "buffers": ["core"]
+    }
   },
   "raylib": {
     "repo": "https://github.com/Pppp1116/astra-raylib",
-    "description": "raylib game programming library",
-    "version": "5.0.0"
+    "description": "Simple and easy-to-use game programming library",
+    "version": "5.0.0",
+    "license": "Zlib",
+    "authors": ["ASTRA Team"],
+    "homepage": "https://astra-lang.org",
+    "keywords": ["games", "graphics", "2d", "gamedev"],
+    "categories": ["Games", "Graphics"],
+    "dependencies": {
+      "c": "1.0.0",
+      "opengl": "4.6.0"
+    },
+    "targets": {
+      "freestanding": false,
+      "hosted": true
+    },
+    "features": {
+      "default": ["core"],
+      "core": ["c", "opengl"],
+      "audio": ["core"],
+      "textures": ["core"],
+      "models": ["core"]
+    }
   },
   "sdl2": {
     "repo": "https://github.com/Pppp1116/astra-sdl2",
-    "description": "SDL2 bindings - window, rendering, input",
-    "version": "2.0.0"
+    "description": "SDL2 multimedia library bindings",
+    "version": "2.0.0",
+    "license": "Zlib",
+    "authors": ["ASTRA Team"],
+    "homepage": "https://astra-lang.org",
+    "keywords": ["sdl2", "multimedia", "games", "input"],
+    "categories": ["Games", "Multimedia"],
+    "dependencies": {
+      "c": "1.0.0"
+    },
+    "targets": {
+      "freestanding": false,
+      "hosted": true
+    },
+    "features": {
+      "default": ["video"],
+      "video": ["c"],
+      "audio": ["video"],
+      "events": ["video"],
+      "render": ["video"]
+    }
   },
   "sqlite3": {
     "repo": "https://github.com/Pppp1116/astra-sqlite3",
-    "description": "SQLite3 bindings",
-    "version": "3.43.0"
+    "description": "SQLite3 database bindings",
+    "version": "3.43.0",
+    "license": "MIT",
+    "authors": ["ASTRA Team"],
+    "homepage": "https://astra-lang.org",
+    "keywords": ["database", "sqlite", "sql", "storage"],
+    "categories": ["Database", "Storage"],
+    "dependencies": {
+      "c": "1.0.0"
+    },
+    "targets": {
+      "freestanding": false,
+      "hosted": true
+    },
+    "features": {
+      "default": ["core"],
+      "core": ["c"],
+      "fts": ["core"],
+      "json1": ["core"]
+    }
+  },
+  "serde_json": {
+    "repo": "https://github.com/astralang/serde_json",
+    "description": "JSON serialization and deserialization library",
+    "version": "1.0.0",
+    "license": "MIT",
+    "authors": ["ASTRA Community"],
+    "homepage": "https://astra-lang.org",
+    "keywords": ["json", "serialization", "serde", "parsing"],
+    "categories": ["Serialization", "Data"],
+    "dependencies": {
+      "std": "1.0.0"
+    },
+    "targets": {
+      "freestanding": true,
+      "hosted": true
+    },
+    "features": {
+      "default": ["core"],
+      "core": [],
+      "pretty": ["core"]
+    }
+  },
+  "regex": {
+    "repo": "https://github.com/astralang/regex",
+    "description": "Regular expression library",
+    "version": "1.0.0",
+    "license": "MIT",
+    "authors": ["ASTRA Community"],
+    "homepage": "https://astra-lang.org",
+    "keywords": ["regex", "text", "parsing", "patterns"],
+    "categories": ["Text", "Parsing"],
+    "dependencies": {
+      "std": "1.0.0"
+    },
+    "targets": {
+      "freestanding": true,
+      "hosted": true
+    },
+    "features": {
+      "default": ["core"],
+      "core": [],
+      "unicode": ["core"]
+    }
+  },
+  "http_client": {
+    "repo": "https://github.com/astralang/http_client",
+    "description": "High-level HTTP client library",
+    "version": "0.1.0",
+    "license": "MIT",
+    "authors": ["ASTRA Community"],
+    "homepage": "https://astra-lang.org",
+    "keywords": ["http", "client", "web", "networking"],
+    "categories": ["Networking", "Web"],
+    "dependencies": {
+      "curl": "8.7.1",
+      "std": "1.0.0"
+    },
+    "targets": {
+      "freestanding": false,
+      "hosted": true
+    },
+    "features": {
+      "default": ["core"],
+      "core": ["std", "curl"],
+      "async": ["core"],
+      "tls": ["core"]
+    }
+  },
+  "game_engine": {
+    "repo": "https://github.com/astralang/game_engine",
+    "description": "Simple 2D game engine",
+    "version": "0.1.0",
+    "license": "MIT",
+    "authors": ["ASTRA Community"],
+    "homepage": "https://astra-lang.org",
+    "keywords": ["games", "engine", "2d", "gamedev"],
+    "categories": ["Games", "Graphics"],
+    "dependencies": {
+      "raylib": "5.0.0",
+      "std": "1.0.0"
+    },
+    "targets": {
+      "freestanding": false,
+      "hosted": true
+    },
+    "features": {
+      "default": ["core"],
+      "core": ["std", "raylib"],
+      "physics": ["core"],
+      "particles": ["core"],
+      "ui": ["core"]
+    }
+  },
+  "cli_utils": {
+    "repo": "https://github.com/astralang/cli_utils",
+    "description": "Command-line interface utilities",
+    "version": "0.1.0",
+    "license": "MIT",
+    "authors": ["ASTRA Community"],
+    "homepage": "https://astra-lang.org",
+    "keywords": ["cli", "terminal", "command-line", "args"],
+    "categories": ["CLI", "Utilities"],
+    "dependencies": {
+      "std": "1.0.0"
+    },
+    "targets": {
+      "freestanding": false,
+      "hosted": true
+    },
+    "features": {
+      "default": ["core"],
+      "core": ["std"],
+      "colors": ["core"],
+      "progress": ["core"]
+    }
   }
 }

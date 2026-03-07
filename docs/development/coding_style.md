@@ -1,19 +1,36 @@
-# Coding Style
+# Formatting
 
-## Python
+Astra formatting is provided by `astra fmt` / `astfmt` (`astra.formatter`).
 
-- keep functions focused and deterministic
-- prefer explicit diagnostics with filename/line/column context
-- document public functions/types with docstrings
+## Defaults
 
-## Astra Source
+- Indentation: 4 spaces
+- Preferred line width: 100
+- One blank line between top-level declarations
+- Multi-line block style by default
 
-- prefer `name: Type` for declarations
-- keep top-level declarations separated by blank lines
-- use stdlib modules through `import std.<module>;`
+## Commands
 
-## Documentation
+Format files in place:
 
-- describe behavior, inputs, outputs, and edge cases
-- avoid ambiguous wording
-- keep examples close to APIs when useful
+```bash
+astra fmt file1.astra file2.astra
+```
+
+Check mode:
+
+```bash
+astra fmt --check file1.astra file2.astra
+```
+
+## Configuration
+
+Formatter config is discovered from nearest parent directory via:
+
+- `astfmt.toml`
+- `Astra.toml`
+
+Supported keys:
+
+- `indent_width` in `{2,4,8}`
+- `line_width` (minimum practical value is 40)

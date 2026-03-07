@@ -1,6 +1,6 @@
 {
   "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
-  "name": "Arixa",
+  "name": "Astra",
   "scopeName": "source.arixa",
   "patterns": [
     { "include": "#comments" },
@@ -9,7 +9,10 @@
     { "include": "#keywords" },
     { "include": "#types" },
     { "include": "#functions" },
-    { "include": "#operators" }
+    { "include": "#operators" },
+    { "include": "#attributes" },
+    { "include": "#gpu" },
+    { "include": "#package" }
   ],
   "repository": {
     "comments": {
@@ -18,7 +21,14 @@
         {
           "name": "comment.block.arixa",
           "begin": "/\\*",
-          "end": "\\*/"
+          "end": "\\*/",
+          "patterns": [
+            { "include": "#comments" }
+          ]
+        },
+        {
+          "name": "comment.line.documentation.arixa",
+          "match": "^\\s*///.*$"
         }
       ]
     },
@@ -29,6 +39,16 @@
           "begin": "\"",
           "end": "\"",
           "patterns": [
+            { "name": "constant.character.escape.arixa", "match": "\\\\." },
+            { "name": "constant.character.escape.unicode.arixa", "match": "\\\\u[0-9a-fA-F]{4}" },
+            { "name": "constant.character.escape.unicode.long.arixa", "match": "\\\\U[0-9a-fA-F]{8}" }
+          ]
+        },
+        {
+          "name": "string.quoted.single.arixa",
+          "begin": "'",
+          "end": "'",
+          "patterns": [
             { "name": "constant.character.escape.arixa", "match": "\\\\." }
           ]
         }
@@ -37,52 +57,210 @@
     "numbers": {
       "patterns": [
         {
-          "name": "constant.numeric.integer.astra",
-          "match": "\\b\\d+(?:[iu]\\d+)?\\b"
+          "name": "constant.numeric.integer.binary.arixa",
+          "match": "\\b0b[01_]+\\b"
         },
         {
-          "name": "constant.numeric.float.astra",
-          "match": "\\b\\d+\\.\\d+(?:[eE][+-]?\\d+)?\\b"
+          "name": "constant.numeric.integer.octal.arixa",
+          "match": "\\b0o[0-7_]+\\b"
+        },
+        {
+          "name": "constant.numeric.integer.hexadecimal.arixa",
+          "match": "\\b0x[0-9a-fA-F_]+\\b"
+        },
+        {
+          "name": "constant.numeric.integer.decimal.arixa",
+          "match": "\\b\\d+(?:_\\d+)*(?:[iu](?:8|16|32|64|128))?\\b"
+        },
+        {
+          "name": "constant.numeric.float.arixa",
+          "match": "\\b\\d+(?:_\\d+)*\\.\\d+(?:_\\d+)*(?:[eE][+-]?\\d+(?:_\\d+)*)?(?:f32|f64)?\\b"
+        },
+        {
+          "name": "constant.numeric.float.arixa",
+          "match": "\\b\\d+(?:_\\d+)*(?:[eE][+-]?\\d+(?:_\\d+)*)?(?:f32|f64)?\\b"
         }
       ]
     },
     "keywords": {
       "patterns": [
         {
-          "name": "keyword.control.astra",
-          "match": "\\b(fn|return|if|else|while|for|in|break|continue|match|drop|defer|comptime|import|type|struct|enum|extern|pub|unsafe|async|await)\\b"
+          "name": "keyword.control.arixa",
+          "match": "\\b(fn|return|if|else|while|for|in|break|continue|match|drop|defer|comptime|import|type|struct|enum|extern|pub|unsafe|async|await|mut|let|where|impl|trait|use|mod|crate|super|self|Self)\\b"
         },
         {
-          "name": "keyword.operator.coalesce.astra",
+          "name": "keyword.control.gpu.arixa",
+          "match": "\\b(gpu|kernel|__global|__shared|__local|blockIdx|threadIdx|blockDim|gridDim)\\b"
+        },
+        {
+          "name": "keyword.operator.coalesce.arixa",
           "match": "\\?\\?"
         },
         {
-          "name": "constant.language.astra",
-          "match": "\\b(true|false|none)\\b"
+          "name": "keyword.operator.arrows.arixa",
+          "match": "=>|->|<-"
+        },
+        {
+          "name": "constant.language.arixa",
+          "match": "\\b(true|false|none|Some|None|Ok|Err|Result|Option)\\b"
+        },
+        {
+          "name": "storage.modifier.lifetime.arixa",
+          "match": "'[a-zA-Z_][a-zA-Z0-9_]*\\b"
         }
       ]
     },
     "types": {
       "patterns": [
         {
-          "name": "support.type.primitive.astra",
-          "match": "\\b(Void|Bool|Int|Float|String|Bytes|Never|isize|usize|i(?:[1-9]|[1-9][0-9]|1[01][0-9]|12[0-8])|u(?:[1-9]|[1-9][0-9]|1[01][0-9]|12[0-8]))\\b"
+          "name": "support.type.primitive.arixa",
+          "match": "\\b(Void|Bool|String|Bytes|Never|isize|usize|i(?:8|16|32|64|128)|u(?:8|16|32|64|128)|f(?:32|64))\\b"
+        },
+        {
+          "name": "support.type.pointer.arixa",
+          "match": "\\b\\*[a-zA-Z_][a-zA-Z0-9_]*\\b"
+        },
+        {
+          "name": "support.type.reference.arixa",
+          "match": "\\b&[a-zA-Z_][a-zA-Z0-9_]*\\b"
+        },
+        {
+          "name": "support.type.array.arixa",
+          "match": "\\b\\[[a-zA-Z_][a-zA-Z0-9_]*\\b"
+        },
+        {
+          "name": "support.type.vector.arixa",
+          "match": "\\bVec<[^>]+>\\b"
+        },
+        {
+          "name": "support.type.option.arixa",
+          "match": "\\b[A-Z][a-zA-Z0-9_]*\\?(?=\\s*\\b|\\s*\\(|\\s*\\[|\\s*\\{|\\s*::)"
+        },
+        {
+          "name": "support.type.result.arixa",
+          "match": "\\b[A-Z][a-zA-Z0-9_]*(?=\\s*<[^>]*>\\s*\\b|\\s*\\b|\\s*\\(|\\s*\\[|\\s*\\{|\\s*::)"
         }
       ]
     },
     "functions": {
       "patterns": [
         {
-          "name": "entity.name.function.astra",
-          "match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\s*(?=\\()"
+          "name": "entity.name.function.arixa",
+          "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\s*(?=\\()"
+        },
+        {
+          "name": "entity.name.function.builtin.arixa",
+          "match": "\\b(print|println|eprint|eprintln|len|push|pop|insert|remove|contains|clone|copy|drop|abs|min|max|clamp|sqrt|sin|cos|tan|log|exp)\\s*(?=\\()"
+        },
+        {
+          "name": "entity.name.function.stdlib.arixa",
+          "match": "\\b(add_checked|sub_checked|mul_checked|gcd|lcm|factorial|mean|vector_add|vector_scale)\\s*(?=\\()"
         }
       ]
     },
     "operators": {
       "patterns": [
         {
-          "name": "keyword.operator.astra",
-          "match": "=>|==|!=|<=|>=|&&|\\|\\||[+\\-*/%<>=!&|^~]"
+          "name": "keyword.operator.arithmetic.arixa",
+          "match": "[+\\-*/%]"
+        },
+        {
+          "name": "keyword.operator.comparison.arixa",
+          "match": "==|!=|<=|>=|<|>"
+        },
+        {
+          "name": "keyword.operator.logical.arixa",
+          "match": "&&|\\|\\||!"
+        },
+        {
+          "name": "keyword.operator.bitwise.arixa",
+          "match": "&|\\||\\^|<<|>>|~"
+        },
+        {
+          "name": "keyword.operator.assignment.arixa",
+          "match": "=|\\+=|\\-=|\\*=|/=|%=|&=|\\|=|\\^=|<<=|>>="
+        },
+        {
+          "name": "keyword.operator.range.arixa",
+          "match": "\\.\\.|\\.\\.="
+        },
+        {
+          "name": "keyword.operator.dereference.arixa",
+          "match": "\\*"
+        },
+        {
+          "name": "keyword.operator.address.arixa",
+          "match": "&"
+        }
+      ]
+    },
+    "attributes": {
+      "patterns": [
+        {
+          "name": "meta.attribute.arixa",
+          "match": "(#\\[)([a-zA-Z_][a-zA-Z0-9_]*)(\\])",
+          "captures": {
+            "1": { "name": "punctuation.definition.attribute.begin.arixa" },
+            "2": { "name": "entity.name.attribute.arixa" },
+            "3": { "name": "punctuation.definition.attribute.end.arixa" }
+          }
+        },
+        {
+          "name": "meta.attribute.link.arixa",
+          "match": "(#\\[link\\(\\s*)([a-zA-Z_][a-zA-Z0-9_]*)(\\s*\\)\\])",
+          "captures": {
+            "1": { "name": "punctuation.definition.attribute.begin.arixa" },
+            "2": { "name": "string.unquoted.link.arixa" },
+            "3": { "name": "punctuation.definition.attribute.end.arixa" }
+          }
+        },
+        {
+          "name": "meta.attribute.derive.arixa",
+          "match": "(#\\[derive\\()([^\\)]+)(\\)\\])",
+          "captures": {
+            "1": { "name": "punctuation.definition.attribute.begin.arixa" },
+            "2": { "name": "entity.name.attribute.derive.arixa" },
+            "3": { "name": "punctuation.definition.attribute.end.arixa" }
+          }
+        }
+      ]
+    },
+    "gpu": {
+      "patterns": [
+        {
+          "name": "keyword.control.gpu.kernel.arixa",
+          "match": "\\b(gpu|kernel)\\b"
+        },
+        {
+          "name": "support.function.gpu.builtin.arixa",
+          "match": "\\b(__syncthreads|__ballot_sync|__shfl_sync|__shfl_up_sync|__shfl_down_sync|__shfl_xor_sync)\\s*(?=\\()"
+        },
+        {
+          "name": "variable.language.gpu.thread.arixa",
+          "match": "\\b(blockIdx|threadIdx|blockDim|gridDim|warpsize)\\b"
+        },
+        {
+          "name": "support.type.gpu.memory.arixa",
+          "match": "\\b(__global|__shared|__local|__constant|__device|__host)\\b"
+        }
+      ]
+    },
+    "package": {
+      "patterns": [
+        {
+          "name": "keyword.control.package.arixa",
+          "match": "\\b(package|dependencies|features|targets|dev-dependencies)\\b"
+        },
+        {
+          "name": "string.quoted.package.arixa",
+          "match": "\"[^\"]*\"",
+          "captures": {
+            "0": { "name": "string.quoted.double.arixa" }
+          }
+        },
+        {
+          "name": "constant.numeric.version.arixa",
+          "match": "\\b\\d+\\.\\d+\\.\\d+\\b"
         }
       ]
     }

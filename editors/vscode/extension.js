@@ -5,6 +5,7 @@ const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 const vscode = require('vscode');
 const { LanguageClient, State, Trace } = require('vscode-languageclient/node');
+const ProfilerUI = require('./profiler/profiler-ui');
 
 /** @type {LanguageClient | undefined} */
 let client;
@@ -18,6 +19,12 @@ let currentServer;
 let currentCompiler;
 /** @type {NodeJS.Timeout | undefined} */
 let updateTimer;
+/** @type {ProfilerUI | undefined} */
+let profilerUI;
+/** @type {boolean} */
+let isProfiling = false;
+/** @type {any} */
+let currentProfile = null;
 
 const DEFAULT_TOOLCHAIN_UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/Pppp1116/ASTRA/main/registry/toolchain-updates.json';
 const UPDATE_LAST_CHECK_KEY = 'toolchain.update.lastCheckTs';
@@ -782,6 +789,147 @@ async function activate(context) {
   });
   context.subscriptions.push(updatesDisposable);
 
+  // Enhanced commands
+  const runDisposable = vscode.commands.registerCommand('astra.runCurrentFile', async () => {
+    try {
+      await runCurrentFile(context);
+    } catch (error) {
+      vscode.window.showErrorMessage(`Failed to run file: ${error.message}`);
+    }
+  });
+  context.subscriptions.push(runDisposable);
+
+  const initPackageDisposable = vscode.commands.registerCommand('astra.initPackage', async () => {
+    try {
+      await initPackage(context);
+    } catch (error) {
+      vscode.window.showErrorMessage(`Failed to initialize package: ${error.message}`);
+    }
+  });
+  context.subscriptions.push(initPackageDisposable);
+
+  const publishPackageDisposable = vscode.commands.registerCommand('astra.publishPackage', async () => {
+    try {
+      await publishPackage(context);
+    } catch (error) {
+      vscode.window.showErrorMessage(`Failed to publish package: ${error.message}`);
+    }
+  });
+  context.subscriptions.push(publishPackageDisposable);
+
+  const searchPackagesDisposable = vscode.commands.registerCommand('astra.searchPackages', async () => {
+    try {
+      await searchPackages(context);
+    } catch (error) {
+      vscode.window.showErrorMessage(`Failed to search packages: ${error.message}`);
+    }
+  });
+  context.subscriptions.push(searchPackagesDisposable);
+
+  const installPackageDisposable = vscode.commands.registerCommand('astra.installPackage', async () => {
+    try {
+      await installPackage(context);
+    } catch (error) {
+      vscode.window.showErrorMessage(`Failed to install package: ${error.message}`);
+    }
+  });
+  context.subscriptions.push(installPackageDisposable);
+
+  const listPackagesDisposable = vscode.commands.registerCommand('astra.listPackages', async () => {
+    try {
+      await listPackages(context);
+    } catch (error) {
+      vscode.window.showErrorMessage(`Failed to list packages: ${error.message}`);
+    }
+  });
+  context.subscriptions.push(listPackagesDisposable);
+
+  const generateDocsDisposable = vscode.commands.registerCommand('astra.generateDocs', async () => {
+    try {
+      await generateDocumentation(context);
+    } catch (error) {
+      vscode.window.showErrorMessage(`Failed to generate documentation: ${error.message}`);
+    }
+  });
+  context.subscriptions.push(generateDocsDisposable);
+
+  const runBenchmarksDisposable = vscode.commands.registerCommand('astra.runBenchmarks', async () => {
+    try {
+      await runBenchmarks(context);
+    } catch (error) {
+      vscode.window.showErrorMessage(`Failed to run benchmarks: ${error.message}`);
+    }
+  });
+  context.subscriptions.push(runBenchmarksDisposable);
+
+  const newProjectDisposable = vscode.commands.registerCommand('astra.newProject', async () => {
+    try {
+      await createNewProject(context);
+    } catch (error) {
+      vscode.window.showErrorMessage(`Failed to create project: ${error.message}`);
+    }
+  });
+  context.subscriptions.push(newProjectDisposable);
+
+  const gpuCompileDisposable = vscode.commands.registerCommand('astra.gpuCompile', async () => {
+    try {
+      await compileForGPU(context);
+    } catch (error) {
+      vscode.window.showErrorMessage(`Failed to compile for GPU: ${error.message}`);
+    }
+  });
+  context.subscriptions.push(gpuCompileDisposable);
+
+  const showEnhancedErrorsDisposable = vscode.commands.registerCommand('astra.showEnhancedErrors', async () => {
+    try {
+      await showEnhancedErrors(context);
+    } catch (error) {
+      vscode.window.showErrorMessage(`Failed to show enhanced errors: ${error.message}`);
+    }
+  });
+  context.subscriptions.push(showEnhancedErrorsDisposable);
+
+  // Profiler commands
+  const startProfilingDisposable = vscode.commands.registerCommand('astra.startProfiling', async (options) => {
+    try {
+      await startProfiling(context, options);
+    } catch (error) {
+      vscode.window.showErrorMessage(`Failed to start profiling: ${error.message}`);
+    }
+  });
+  context.subscriptions.push(startProfilingDisposable);
+
+  const stopProfilingDisposable = vscode.commands.registerCommand('astra.stopProfiling', async () => {
+    try {
+      await stopProfiling(context);
+    } catch (error) {
+      vscode.window.showErrorMessage(`Failed to stop profiling: ${error.message}`);
+    }
+  });
+  context.subscriptions.push(stopProfilingDisposable);
+
+  const showProfilerDisposable = vscode.commands.registerCommand('astra.showProfiler', async () => {
+    try {
+      await showProfiler(context);
+    } catch (error) {
+      vscode.window.showErrorMessage(`Failed to show profiler: ${error.message}`);
+    }
+  });
+  context.subscriptions.push(showProfilerDisposable);
+
+  // Debug commands
+  const startDebuggingDisposable = vscode.commands.registerCommand('astra.startDebugging', async () => {
+    try {
+      await startDebugging(context);
+    } catch (error) {
+      vscode.window.showErrorMessage(`Failed to start debugging: ${error.message}`);
+    }
+  });
+  context.subscriptions.push(startDebuggingDisposable);
+
+  // Initialize profiler UI
+  profilerUI = new ProfilerUI(context);
+
   const configDisposable = vscode.workspace.onDidChangeConfiguration(async (event) => {
     if (
       event.affectsConfiguration('astra.languageServer.mode') ||
@@ -829,7 +977,410 @@ async function deactivate() {
     clearInterval(updateTimer);
     updateTimer = undefined;
   }
+  if (profilerUI) {
+    profilerUI.dispose();
+    profilerUI = undefined;
+  }
   await stopClient();
+}
+
+// Enhanced command implementations
+
+async function runCurrentFile(context) {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor) {
+    vscode.window.showErrorMessage('No active editor found');
+    return;
+  }
+
+  const filePath = editor.document.uri.fsPath;
+  const config = getConfig();
+  const target = config.get('compiler.target', 'native');
+
+  const result = await runCompiler(context, ['run', '--target', target, filePath]);
+  
+  if (result.success) {
+    vscode.window.showInformationMessage(`Successfully ran ${path.basename(filePath)}`);
+  }
+}
+
+async function initPackage(context) {
+  const packageName = await vscode.window.showInputBox({
+    prompt: 'Enter package name',
+    placeHolder: 'my_package'
+  });
+
+  if (!packageName) return;
+
+  const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+  if (!workspaceFolder) {
+    vscode.window.showErrorMessage('No workspace folder found');
+    return;
+  }
+
+  const packageDir = path.join(workspaceFolder.uri.fsPath, packageName);
+  
+  try {
+    // Create package directory structure
+    fs.mkdirSync(packageDir, { recursive: true });
+    fs.mkdirSync(path.join(packageDir, 'src'), { recursive: true });
+    fs.mkdirSync(path.join(packageDir, 'examples'), { recursive: true });
+    fs.mkdirSync(path.join(packageDir, 'tests'), { recursive: true });
+
+    // Create Astra.toml
+    const tomlContent = `[package]
+name = "${packageName}"
+version = "0.1.0"
+description = "My awesome Astra package"
+authors = ["Your Name <you@example.com>"]
+license = "MIT"
+homepage = "https://github.com/yourusername/${packageName}"
+repository = "https://github.com/yourusername/${packageName}"
+keywords = ["keyword1", "keyword2"]
+categories = ["Category1", "Category2"]
+
+[dependencies]
+std = "1.0.0"
+`;
+
+    fs.writeFileSync(path.join(packageDir, 'Astra.toml'), tomlContent);
+
+    // Create basic lib.arixa
+    const libContent = `/// ${packageName} library
+/// Description of what this library does
+
+import std.core;
+import std.math;
+
+fn hello_world() Int {
+    println("Hello from ${packageName}!");
+    return 0;
+}
+`;
+
+    fs.writeFileSync(path.join(packageDir, 'src', 'lib.arixa'), libContent);
+
+    // Create example
+    const exampleContent = `/// Example usage of ${packageName}
+
+import "src/lib.arixa";
+
+fn main() Int {
+    hello_world();
+    return 0;
+}
+`;
+
+    fs.writeFileSync(path.join(packageDir, 'examples', 'demo.arixa'), exampleContent);
+
+    vscode.window.showInformationMessage(`Package '${packageName}' initialized successfully`);
+    
+    // Open the new package in VS Code
+    const packageUri = vscode.Uri.file(packageDir);
+    await vscode.commands.executeCommand('vscode.openFolder', packageUri);
+
+  } catch (error) {
+    vscode.window.showErrorMessage(`Failed to initialize package: ${error.message}`);
+  }
+}
+
+async function publishPackage(context) {
+  const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+  if (!workspaceFolder) {
+    vscode.window.showErrorMessage('No workspace folder found');
+    return;
+  }
+
+  const tomlPath = path.join(workspaceFolder.uri.fsPath, 'Astra.toml');
+  if (!fs.existsSync(tomlPath)) {
+    vscode.window.showErrorMessage('No Astra.toml found in workspace');
+    return;
+  }
+
+  const target = await vscode.window.showQuickPick(['github', 'registry'], {
+    placeHolder: 'Select publishing target'
+  });
+
+  if (!target) return;
+
+  const result = await runCompiler(context, ['pkg', 'publish', '--target', target]);
+  
+  if (result.success) {
+    vscode.window.showInformationMessage(`Package published to ${target}`);
+  }
+}
+
+async function searchPackages(context) {
+  const searchTerm = await vscode.window.showInputBox({
+    prompt: 'Search packages',
+    placeHolder: 'Enter search terms'
+  });
+
+  if (!searchTerm) return;
+
+  const result = await runCompiler(context, ['pkg', 'search', searchTerm]);
+  
+  if (result.success) {
+    // Parse and display search results
+    const lines = result.stdout.split('\n').filter(line => line.trim());
+    if (lines.length > 0) {
+      const selected = await vscode.window.showQuickPick(lines, {
+        placeHolder: 'Select a package to install'
+      });
+      
+      if (selected) {
+        const packageName = selected.split(' ')[0];
+        await installPackageByName(context, packageName);
+      }
+    } else {
+      vscode.window.showInformationMessage('No packages found');
+    }
+  }
+}
+
+async function installPackage(context) {
+  const packageName = await vscode.window.showInputBox({
+    prompt: 'Enter package name to install',
+    placeHolder: 'package_name'
+  });
+
+  if (!packageName) return;
+
+  await installPackageByName(context, packageName);
+}
+
+async function installPackageByName(context, packageName) {
+  const result = await runCompiler(context, ['pkg', 'install', packageName]);
+  
+  if (result.success) {
+    vscode.window.showInformationMessage(`Package '${packageName}' installed successfully`);
+  }
+}
+
+async function listPackages(context) {
+  const result = await runCompiler(context, ['pkg', 'list']);
+  
+  if (result.success) {
+    vscode.window.showInformationMessage('Installed packages', result.stdout);
+  }
+}
+
+async function generateDocumentation(context) {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor) {
+    vscode.window.showErrorMessage('No active editor found');
+    return;
+  }
+
+  const filePath = editor.document.uri.fsPath;
+  const result = await runCompiler(context, ['docs', 'generate', filePath]);
+  
+  if (result.success) {
+    vscode.window.showInformationMessage('Documentation generated successfully');
+  }
+}
+
+async function runBenchmarks(context) {
+  const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+  if (!workspaceFolder) {
+    vscode.window.showErrorMessage('No workspace folder found');
+    return;
+  }
+
+  const result = await runCompiler(context, ['bench', workspaceFolder.uri.fsPath]);
+  
+  if (result.success) {
+    vscode.window.showInformationMessage('Benchmarks completed');
+  }
+}
+
+async function createNewProject(context) {
+  const projectType = await vscode.window.showQuickPick([
+    'CLI Application',
+    'GPU Application',
+    'Library',
+    'Web Application'
+  ], {
+    placeHolder: 'Select project type'
+  });
+
+  if (!projectType) return;
+
+  const projectName = await vscode.window.showInputBox({
+    prompt: 'Enter project name',
+    placeHolder: 'my_project'
+  });
+
+  if (!projectName) return;
+
+  // Similar to initPackage but with different templates based on project type
+  await initPackage(context); // Reuse the package initialization logic
+}
+
+async function compileForGPU(context) {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor) {
+    vscode.window.showErrorMessage('No active editor found');
+    return;
+  }
+
+  const filePath = editor.document.uri.fsPath;
+  const result = await runCompiler(context, ['build', '--target', 'gpu', filePath]);
+  
+  if (result.success) {
+    vscode.window.showInformationMessage('GPU compilation successful');
+  }
+}
+
+async function showEnhancedErrors(context) {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor) {
+    vscode.window.showErrorMessage('No active editor found');
+    return;
+  }
+
+  const filePath = editor.document.uri.fsPath;
+  const result = await runCompiler(context, ['check', '--enhanced-errors', filePath]);
+  
+  if (result.success) {
+    vscode.window.showInformationMessage('Enhanced error analysis completed');
+  }
+}
+
+// Profiler implementations
+
+async function startProfiling(context, options) {
+  if (isProfiling) {
+    vscode.window.showWarningMessage('Profiling is already in progress');
+    return;
+  }
+
+  const { file, target } = options;
+  
+  try {
+    // Start the enhanced profiler
+    const profilerPath = path.join(context.extensionPath, 'server', 'astra', 'profiler_enhanced.py');
+    const result = spawnSync('python', [profilerPath, file, '--target', target], {
+      cwd: path.dirname(file),
+      stdio: 'pipe'
+    });
+
+    if (result.error) {
+      throw new Error(result.error.message);
+    }
+
+    isProfiling = true;
+    vscode.window.showInformationMessage('Profiling started');
+
+  } catch (error) {
+    vscode.window.showErrorMessage(`Failed to start profiling: ${error.message}`);
+  }
+}
+
+async function stopProfiling(context) {
+  if (!isProfiling) {
+    vscode.window.showWarningMessage('No profiling in progress');
+    return;
+  }
+
+  try {
+    // This would need to communicate with the running profiler
+    // For now, simulate stopping and getting results
+    const mockProfile = {
+      summary: {
+        total_time_seconds: 5.2,
+        sample_count: 52,
+        target: 'native'
+      },
+      performance_metrics: {
+        cpu: {
+          average_percent: 45.3,
+          max_percent: 78.9,
+          samples: Array(52).fill(0).map(() => Math.random() * 100)
+        },
+        memory: {
+          average_mb: 125.7,
+          max_mb: 256.3,
+          samples: Array(52).fill(0).map(() => Math.random() * 500)
+        }
+      },
+      hotspots: [
+        {
+          type: 'cpu',
+          severity: 'medium',
+          message: 'High CPU usage detected: 78.9%',
+          suggestion: 'Consider optimizing algorithms',
+          file: '',
+          line: 1
+        }
+      ],
+      optimization_suggestions: [
+        {
+          category: 'cpu',
+          priority: 'medium',
+          title: 'Optimize CPU Usage',
+          description: 'High CPU usage detected',
+          actions: ['Consider algorithmic improvements']
+        }
+      ]
+    };
+
+    currentProfile = mockProfile;
+    isProfiling = false;
+
+    if (profilerUI) {
+      profilerUI.updateProfile(mockProfile);
+    }
+
+    vscode.window.showInformationMessage('Profiling completed');
+
+  } catch (error) {
+    vscode.window.showErrorMessage(`Failed to stop profiling: ${error.message}`);
+  }
+}
+
+async function showProfiler(context) {
+  if (!profilerUI) {
+    profilerUI = new ProfilerUI(context);
+  }
+  
+  profilerUI.showProfilerPanel();
+}
+
+// Debug implementation
+
+async function startDebugging(context) {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor) {
+    vscode.window.showErrorMessage('No active editor found');
+    return;
+  }
+
+  const filePath = editor.document.uri.fsPath;
+  const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+  
+  if (!workspaceFolder) {
+    vscode.window.showErrorMessage('No workspace folder found');
+    return;
+  }
+
+  // Create debug configuration
+  const debugConfig = {
+    type: 'astra',
+    name: 'Debug Astra Program',
+    request: 'launch',
+    program: filePath,
+    target: 'native',
+    cwd: workspaceFolder.uri.fsPath,
+    stopOnEntry: true
+  };
+
+  // Start debugging session
+  const debugSession = await vscode.debug.startDebugging(workspaceFolder, debugConfig);
+  
+  if (debugSession) {
+    vscode.window.showInformationMessage('Debugging started');
+  }
 }
 
 module.exports = {

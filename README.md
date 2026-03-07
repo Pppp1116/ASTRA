@@ -48,27 +48,17 @@ python build/hello.py
 
 ## Documentation
 
-- Full docs index: `docs/README.md`
-- Language reference: `docs/language/`
-- Standard library reference: `docs/stdlib/`
-- Tooling and CLI docs: `docs/tooling/`
-- Compiler internals: `docs/compiler/`
-- GPU subsystem docs: `docs/gpu/`
-- Contributor/development docs: `docs/development/`
+- **Getting Started**: `docs/development/getting-started.md`
+- **Language Specification**: `docs/language/specification.md`
+- **Language Reference**: `docs/language/`
+- **Standard Library**: `docs/stdlib/`
+- **Compiler Internals**: `docs/compiler/`
+- **GPU Development**: `docs/gpu/`
+- **Tooling & VS Code**: `docs/tools/`
+- **Development Guide**: `docs/development/`
+- **Reference Materials**: `docs/reference/`
 
 Current compiler behavior note:
 
 - import paths are resolved and validated by semantic analysis.
 - most callable stdlib-facing functions are currently surfaced through builtin names.
-
-Top-level project docs:
-
-- `ARCHITECTURE.md`
-- `COMPILER_OVERVIEW.md`
-- `BUILD_SYSTEM.md`
-- `TESTING.md`
-- `FORMATTING.md`
-- `EDITOR_SETUP.md`
-- `CONTRIBUTING.md`
-- `SECURITY.md`
-- `ROADMAP.md`

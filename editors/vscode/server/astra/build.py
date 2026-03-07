@@ -82,7 +82,7 @@ from astra.optimizer import optimize_program
 from astra.parser import parse
 from astra.semantic import analyze
 
-CACHE = Path('.astra-cache.json')
+CACHE = Path('.arixa-cache.json')
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _TOOLCHAIN_STAMP: str | None = None
 
@@ -127,7 +127,7 @@ def _toolchain_stamp() -> str:
         parts.append(f"{runtime_c.as_posix()}:{_sha256_file(runtime_c)}")
     std_root = stdlib_root_path()
     if std_root is not None:
-        for p in _iter_tree_files(std_root, {".astra"}):
+        for p in _iter_tree_files(std_root, {".arixa"}):
             rel = p.relative_to(std_root).as_posix()
             parts.append(f"stdlib:{rel}:{_sha256_file(p)}")
     _TOOLCHAIN_STAMP = _hash("\n".join(parts))

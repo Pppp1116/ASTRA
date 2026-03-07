@@ -2,11 +2,36 @@
   "Function": {
     "prefix": "fn",
     "body": [
-      "fn ${1:name}(${2:arg} ${3:Int}) ${4:Void} {",
+      "fn ${1:name}(${2:arg} ${3:Int}) ${4:Int} {",
       "    ${0}",
       "}"
     ],
-    "description": "Declare an Arixa function"
+    "description": "Declare an Astra function"
+  },
+  "Function with Return Type": {
+    "prefix": "fnr",
+    "body": [
+      "fn ${1:name}(${2:arg} ${3:Int}) -> ${4:ReturnType} {",
+      "    ${0}",
+      "}"
+    ],
+    "description": "Declare an Astra function with explicit return type"
+  },
+  "GPU Kernel Function": {
+    "prefix": "kernel",
+    "body": [
+      "gpu fn ${1:name}(${2:arg} ${3:Int}) ${4:Int} {",
+      "    ${0}",
+      "}"
+    ],
+    "description": "Declare a GPU kernel function"
+  },
+  "Extern Function": {
+    "prefix": "extern",
+    "body": [
+      "extern fn ${1:name}(${2:arg} ${3:Int}) ${4:Int};"
+    ],
+    "description": "Declare an external function"
   },
   "Immutable Binding": {
     "prefix": "let",
@@ -47,6 +72,19 @@
     ],
     "description": "If/else block"
   },
+  "If Else If": {
+    "prefix": "ife",
+    "body": [
+      "if ${1:condition} {",
+      "    ${2}",
+      "} else if ${3:condition} {",
+      "    ${4}",
+      "} else {",
+      "    ${0}",
+      "}"
+    ],
+    "description": "If/else if/else block"
+  },
   "For In": {
     "prefix": "for",
     "body": [
@@ -55,6 +93,24 @@
       "}"
     ],
     "description": "For-in loop"
+  },
+  "For Range": {
+    "prefix": "forr",
+    "body": [
+      "for ${1:i} in ${2:0}..${3:10} {",
+      "    ${0}",
+      "}"
+    ],
+    "description": "For range loop"
+  },
+  "While": {
+    "prefix": "while",
+    "body": [
+      "while ${1:condition} {",
+      "    ${0}",
+      "}"
+    ],
+    "description": "While loop"
   },
   "Match": {
     "prefix": "match",
@@ -70,6 +126,34 @@
     ],
     "description": "Match expression"
   },
+  "Match Option": {
+    "prefix": "matchopt",
+    "body": [
+      "match ${1:option} {",
+      "    Some(${2:value}) => {",
+      "        ${3}",
+      "    },",
+      "    None => {",
+      "        ${0}",
+      "    },",
+      "}"
+    ],
+    "description": "Match Option type"
+  },
+  "Match Result": {
+    "prefix": "matchres",
+    "body": [
+      "match ${1:result} {",
+      "    Ok(${2:value}) => {",
+      "        ${3}",
+      "    },",
+      "    Err(${3:error}) => {",
+      "        ${0}",
+      "    },",
+      "}"
+    ],
+    "description": "Match Result type"
+  },
   "Struct": {
     "prefix": "struct",
     "body": [
@@ -79,11 +163,271 @@
     ],
     "description": "Struct declaration"
   },
+  "Struct with Derive": {
+    "prefix": "structd",
+    "body": [
+      "#[derive(${1:Clone, Copy})]",
+      "struct ${2:Name} {",
+      "    ${3:field} ${4:Int},",
+      "}"
+    ],
+    "description": "Struct declaration with derives"
+  },
+  "Enum": {
+    "prefix": "enum",
+    "body": [
+      "enum ${1:Name} {",
+      "    ${2:Variant},",
+      "}"
+    ],
+    "description": "Enum declaration"
+  },
+  "Enum with Values": {
+    "prefix": "enumv",
+    "body": [
+      "enum ${1:Name} {",
+      "    ${2:Variant}(${3:type}),",
+      "    ${4:Other} = ${5:value},",
+      "}"
+    ],
+    "description": "Enum declaration with values"
+  },
+  "Type Alias": {
+    "prefix": "type",
+    "body": [
+      "type ${1:Alias} = ${2:Type};"
+    ],
+    "description": "Type alias declaration"
+  },
   "Import Std": {
     "prefix": "impstd",
     "body": [
       "import std.${1:io};"
     ],
     "description": "Import from Astra stdlib"
+  },
+  "Import Multiple": {
+    "prefix": "imp",
+    "body": [
+      "import std.${1:core};",
+      "import std.${2:math};",
+      "import std.${3:io};"
+    ],
+    "description": "Import multiple stdlib modules"
+  },
+  "Import File": {
+    "prefix": "impfile",
+    "body": [
+      "import \"${1:module}.arixa\";"
+    ],
+    "description": "Import local file"
+  },
+  "GPU Import": {
+    "prefix": "impgpu",
+    "body": [
+      "import std.gpu;"
+    ],
+    "description": "Import GPU module"
+  },
+  "Package Manifest": {
+    "prefix": "pkg",
+    "body": [
+      "[package]",
+      "name = \"${1:my_package}\"",
+      "version = \"${2:0.1.0}\"",
+      "description = \"${3:My awesome Astra package}\"",
+      "authors = [\"Your Name <you@example.com>\"]",
+      "license = \"MIT\"",
+      "homepage = \"https://github.com/yourusername/${1:my_package}\"",
+      "repository = \"https://github.com/yourusername/${1:my_package}\"",
+      "keywords = [\"${4:keyword1}\", \"${5:keyword2}\"]",
+      "categories = [\"${6:Category1}\", \"${7:Category2}\"]",
+      "",
+      "[dependencies]",
+      "std = \"1.0.0\""
+    ],
+    "description": "Package manifest template"
+  },
+  "Link Attribute": {
+    "prefix": "link",
+    "body": [
+      "#[link(\"${1:c}\")]"
+    ],
+    "description": "Link attribute for external libraries"
+  },
+  "Derive Attribute": {
+    "prefix": "derive",
+    "body": [
+      "#[derive(${1:Clone, Copy})]"
+    ],
+    "description": "Derive attribute"
+  },
+  "Unsafe Block": {
+    "prefix": "unsafe",
+    "body": [
+      "unsafe {",
+      "    ${0}",
+      "}"
+    ],
+    "description": "Unsafe block"
+  },
+  "Unsafe Function": {
+    "prefix": "unsafefn",
+    "body": [
+      "unsafe fn ${1:name}(${2:arg} ${3:Int}) ${4:Int} {",
+      "    ${0}",
+      "}"
+    ],
+    "description": "Unsafe function"
+  },
+  "Comptime Block": {
+    "prefix": "comptime",
+    "body": [
+      "comptime {",
+      "    ${0}",
+      "}"
+    ],
+    "description": "Comptime block"
+  },
+  "GPU Kernel Template": {
+    "prefix": "gputemplate",
+    "body": [
+      "import std.gpu;",
+      "",
+      "gpu fn ${1:vector_add}(${2:a} *Float, ${3:b} *Float, ${4:result} *Float, ${5:n} Int) Int {",
+      "    idx = blockIdx.x * blockDim.x + threadIdx.x;",
+      "    if idx >= n {",
+      "        return 0;",
+      "    }",
+      "    ",
+      "    result[idx] = a[idx] + b[idx];",
+      "    return 0;",
+      "}",
+      "",
+      "fn main() Int {",
+      "    // GPU code here",
+      "    return 0;",
+      "}"
+    ],
+    "description": "GPU kernel template with thread indexing"
+  },
+  "Option Pattern": {
+    "prefix": "option",
+    "body": [
+      "Option<${1:Type}>"
+    ],
+    "description": "Option type"
+  },
+  "Result Pattern": {
+    "prefix": "result",
+    "body": [
+      "Result<${1:SuccessType}, ${2:ErrorType}>"
+    ],
+    "description": "Result type"
+  },
+  "Vector Type": {
+    "prefix": "vec",
+    "body": [
+      "Vec<${1:Type}>"
+    ],
+    "description": "Vector type"
+  },
+  "Pointer Type": {
+    "prefix": "ptr",
+    "body": [
+      "*${1:Type}"
+    ],
+    "description": "Pointer type"
+  },
+  "Reference Type": {
+    "prefix": "ref",
+    "body": [
+      "&${1:Type}"
+    ],
+    "description": "Reference type"
+  },
+  "Array Type": {
+    "prefix": "array",
+    "body": [
+      "[${1:Type}; ${2:size}]"
+    ],
+    "description": "Array type"
+  },
+  "Binary Number": {
+    "prefix": "bin",
+    "body": [
+      "0b${1:1010}"
+    ],
+    "description": "Binary literal"
+  },
+  "Hex Number": {
+    "prefix": "hex",
+    "body": [
+      "0x${1:FF}"
+    ],
+    "description": "Hexadecimal literal"
+  },
+  "Octal Number": {
+    "prefix": "oct",
+    "body": [
+      "0o${1:755}"
+    ],
+    "description": "Octal literal"
+  },
+  "Test Function": {
+    "prefix": "test",
+    "body": [
+      "fn test_${1:name}() Int {",
+      "    ${0}",
+      "    return 0;",
+      "}"
+    ],
+    "description": "Test function"
+  },
+  "Benchmark Function": {
+    "prefix": "bench",
+    "body": [
+      "fn bench_${1:name}() Int {",
+      "    ${0}",
+      "    return 0;",
+      "}"
+    ],
+    "description": "Benchmark function"
+  },
+  "Main Function": {
+    "prefix": "main",
+    "body": [
+      "fn main() Int {",
+      "    ${0}",
+      "    return 0;",
+      "}"
+    ],
+    "description": "Main function"
+  },
+  "Error Handling": {
+    "prefix": "error",
+    "body": [
+      "match ${1:result} {",
+      "    Ok(value) => {",
+      "        // Handle success",
+      "        ${2}",
+      "    },",
+      "    Err(error) => {",
+      "        // Handle error",
+      "        ${0}",
+      "    },",
+      "}"
+    ],
+    "description": "Error handling pattern"
+  },
+  "Iterator Chain": {
+    "prefix": "iter",
+    "body": [
+      "${1:collection}.iter()",
+      "    .map(|${2:item}| ${3:transformation})",
+      "    .filter(|${4:item}| ${5:condition})",
+      "    .collect()"
+    ],
+    "description": "Iterator chain pattern"
   }
 }

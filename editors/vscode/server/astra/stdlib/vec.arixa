@@ -17,7 +17,7 @@ fn vec_push_typed(v Vec<T>, value T) Int{
     return vec_push(v, value);
 }
 
-/// Get an element by index as `Option<T>`.
-fn vec_get_typed(v Vec<T>, index Int) Option<T>{
+/// Get an element by index as nullable.
+fn vec_get_typed(v Vec<T>, index Int) Any{
     return vec_get(v, index);
 }

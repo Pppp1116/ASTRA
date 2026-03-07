@@ -34,12 +34,12 @@ def _package_home() -> Path:
     try:
         import os
 
-        env = os.environ.get("ASTRA_PKG_HOME")
+        env = os.environ.get("ARIXA_PKG_HOME")
     except Exception:
         env = None
     if env:
         return Path(env).expanduser().resolve()
-    return (Path.home() / ".astra" / "packages").resolve()
+    return (Path.home() / ".arixa" / "packages").resolve()
 
 
 def _registry_cache_path() -> Path:

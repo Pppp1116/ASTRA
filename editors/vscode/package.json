@@ -1,23 +1,30 @@
 {
   "name": "arixa-language",
-  "displayName": "Arixa Language",
-  "description": "VS Code support for Arixa via the arlsp language server.",
-  "version": "0.4.3",
+  "displayName": "Astra Language",
+  "description": "Complete VS Code support for Astra with enhanced syntax highlighting, IntelliSense, package management, and GPU development tools.",
+  "version": "0.5.0",
   "icon": "images/arixa.png",
   "publisher": "arixa-lang",
   "engines": {
     "vscode": "^1.88.0"
   },
   "categories": [
-    "Programming Languages"
+    "Programming Languages",
+    "Snippets",
+    "Linters",
+    "Formatters"
   ],
   "keywords": [
     "arixa",
+    "astra",
     "language",
-    "lsp"
+    "lsp",
+    "gpu",
+    "cuda",
+    "package-manager",
+    "enhanced-syntax"
   ],
-  "activationEvents": [],
-  "files": [
+    "files": [
     "extension.js",
     "language-configuration.json",
     "syntaxes/**",
@@ -34,8 +41,10 @@
       {
         "id": "arixa",
         "aliases": [
+          "Astra",
           "Arixa",
-          "arixa"
+          "arixa",
+          "astra"
         ],
         "extensions": [
           ".arixa"
@@ -63,27 +72,71 @@
     "commands": [
       {
         "command": "arixa.restartLanguageServer",
-        "title": "Arixa: Restart Language Server"
+        "title": "Astra: Restart Language Server"
       },
       {
         "command": "arixa.showLanguageServerStatus",
-        "title": "Arixa: Show Language Server Status"
+        "title": "Astra: Show Language Server Status"
       },
       {
         "command": "arixa.openExtensionLog",
-        "title": "Arixa: Open Extension Log"
+        "title": "Astra: Open Extension Log"
       },
       {
         "command": "arixa.buildCurrentFile",
-        "title": "Arixa: Build Current File"
+        "title": "Astra: Build Current File"
+      },
+      {
+        "command": "arixa.runCurrentFile",
+        "title": "Astra: Run Current File"
       },
       {
         "command": "arixa.checkForToolchainUpdates",
-        "title": "Arixa: Check Toolchain Updates"
+        "title": "Astra: Check Toolchain Updates"
+      },
+      {
+        "command": "arixa.initPackage",
+        "title": "Astra: Initialize Package"
+      },
+      {
+        "command": "arixa.publishPackage",
+        "title": "Astra: Publish Package"
+      },
+      {
+        "command": "arixa.searchPackages",
+        "title": "Astra: Search Packages"
+      },
+      {
+        "command": "arixa.installPackage",
+        "title": "Astra: Install Package"
+      },
+      {
+        "command": "arixa.listPackages",
+        "title": "Astra: List Installed Packages"
+      },
+      {
+        "command": "arixa.generateDocs",
+        "title": "Astra: Generate Documentation"
+      },
+      {
+        "command": "arixa.runBenchmarks",
+        "title": "Astra: Run Benchmarks"
+      },
+      {
+        "command": "arixa.newProject",
+        "title": "Astra: New Project"
+      },
+      {
+        "command": "arixa.gpuCompile",
+        "title": "Astra: Compile for GPU"
+      },
+      {
+        "command": "arixa.showEnhancedErrors",
+        "title": "Astra: Show Enhanced Error Messages"
       }
     ],
     "configuration": {
-      "title": "Arixa",
+      "title": "Astra",
       "properties": {
         "arixa.languageServer.mode": {
           "type": "string",
@@ -97,7 +150,7 @@
         "arixa.languageServer.command": {
           "type": "string",
           "default": "",
-          "description": "Executable used to launch the Arixa language server in external mode."
+          "description": "Executable used to launch the Astra language server in external mode."
         },
         "arixa.languageServer.pythonPath": {
           "type": "string",
@@ -110,7 +163,7 @@
             "type": "string"
           },
           "default": [],
-          "description": "Additional command line arguments passed to the external Arixa language server."
+          "description": "Additional command line arguments passed to the external Astra language server."
         },
         "arixa.trace.server": {
           "type": "string",
@@ -134,7 +187,7 @@
         "arixa.compiler.command": {
           "type": "string",
           "default": "",
-          "description": "Executable used to launch the Arixa compiler in external mode."
+          "description": "Executable used to launch the Astra compiler in external mode."
         },
         "arixa.compiler.pythonPath": {
           "type": "string",
@@ -154,15 +207,16 @@
           "enum": [
             "py",
             "llvm",
-            "native"
+            "native",
+            "gpu"
           ],
           "default": "native",
-          "description": "Default target for `Arixa: Build Current File`."
+          "description": "Default target for `Astra: Build Current File`."
         },
         "arixa.compiler.outputDir": {
           "type": "string",
           "default": ".arixa-build",
-          "description": "Output directory for `Arixa: Build Current File` (absolute or workspace-relative)."
+          "description": "Output directory for `Astra: Build Current File` (absolute or workspace-relative)."
         },
         "arixa.compiler.buildArgs": {
           "type": "array",
@@ -172,10 +226,86 @@
           "default": [],
           "description": "Extra CLI arguments appended to `arixa build`."
         },
+        "arixa.enhancedErrors.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable enhanced error messages with suggestions and context."
+        },
+        "arixa.enhancedErrors.showSuggestions": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show actionable suggestions for fixing errors."
+        },
+        "arixa.enhancedErrors.showNotes": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show contextual notes for errors."
+        },
+        "arixa.packageManager.autoInstall": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically install missing packages when detected."
+        },
+        "arixa.packageManager.registryUrl": {
+          "type": "string",
+          "default": "https://registry.astra-lang.org",
+          "description": "Package registry URL for discovery and installation."
+        },
+        "arixa.gpu.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable GPU development features and CUDA compilation."
+        },
+        "arixa.gpu.defaultBackend": {
+          "type": "string",
+          "enum": [
+            "cuda",
+            "stub"
+          ],
+          "default": "cuda",
+          "description": "Default GPU backend for compilation."
+        },
+        "arixa.formatting.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable automatic formatting on save."
+        },
+        "arixa.formatting.indentSize": {
+          "type": "number",
+          "default": 4,
+          "minimum": 1,
+          "maximum": 8,
+          "description": "Number of spaces for indentation."
+        },
+        "arixa.linting.enabled": {
+          "type": "boolean",
+          "default": "true",
+          "description": "Enable linting and code quality checks."
+        },
+        "arixa.linting.warningsAsErrors": {
+          "type": "boolean",
+          "default": false,
+          "description": "Treat warnings as errors in diagnostics."
+        },
+        "arixa.intelliSense.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable enhanced IntelliSense features."
+        },
+        "arixa.intelliSense.autoImport": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically suggest imports for unresolved symbols."
+        },
+        "arixa.documentation.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable documentation generation and hover information."
+        },
         "arixa.toolchain.autoUpdateCheck": {
           "type": "boolean",
           "default": true,
-          "description": "Periodically check online for newer Arixa toolchain versions."
+          "description": "Periodically check online for newer Astra toolchain versions."
         },
         "arixa.toolchain.checkIntervalHours": {
           "type": "number",
@@ -212,9 +342,238 @@
         "editor.guides.indentation": true,
         "editor.bracketPairColorization.enabled": true,
         "editor.minimap.enabled": false,
-        "editor.fontLigatures": false
+        "editor.fontLigatures": false,
+        "editor.semanticHighlighting.enabled": true,
+        "editor.inlayHints.enabled": "on",
+        "editor.codeActionsOnSave.enabled": true,
+        "editor.suggest.insertMode": "replace",
+        "editor.acceptSuggestionOnEnter": "on"
       }
-    }
+    },
+    "keybindings": [
+      {
+        "key": "ctrl+shift+b",
+        "command": "arixa.buildCurrentFile",
+        "when": "editorLangId == arixa"
+      },
+      {
+        "key": "ctrl+shift+r",
+        "command": "arixa.runCurrentFile",
+        "when": "editorLangId == arixa"
+      },
+      {
+        "key": "ctrl+shift+p",
+        "command": "arixa.publishPackage",
+        "when": "editorLangId == arixa"
+      },
+      {
+        "key": "ctrl+shift+s",
+        "command": "arixa.searchPackages",
+        "when": "editorLangId == arixa"
+      },
+      {
+        "key": "f5",
+        "command": "arixa.runCurrentFile",
+        "when": "editorLangId == arixa"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "when": "editorLangId == arixa",
+          "command": "arixa.buildCurrentFile",
+          "group": "navigation@1"
+        },
+        {
+          "when": "editorLangId == arixa",
+          "command": "arixa.runCurrentFile",
+          "group": "navigation@2"
+        },
+        {
+          "when": "editorLangId == arixa",
+          "command": "arixa.gpuCompile",
+          "group": "navigation@3"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "arixa.initPackage",
+          "when": "false"
+        },
+        {
+          "command": "arixa.publishPackage",
+          "when": "false"
+        },
+        {
+          "command": "arixa.searchPackages",
+          "when": "false"
+        },
+        {
+          "command": "arixa.installPackage",
+          "when": "false"
+        },
+        {
+          "command": "arixa.listPackages",
+          "when": "false"
+        },
+        {
+          "command": "arixa.newProject",
+          "when": "false"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "arixa.showLanguageServerStatus",
+          "when": "arixa:showStatusBar",
+          "group": "navigation"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "arixa-explorer",
+          "title": "Astra",
+          "icon": "$(package)"
+        }
+      ]
+    },
+    "views": {
+      "arixa-explorer": [
+        {
+          "id": "arixa-packages",
+          "name": "Packages",
+          "when": "arixa:showPackages",
+          "icon": "$(package)"
+        },
+        {
+          "id": "arixa-gpu",
+          "name": "GPU Development",
+          "when": "arixa:showGPU",
+          "icon": "$(pulse)"
+        },
+        {
+          "id": "arixa-tools",
+          "name": "Tools",
+          "when": "arixa:showTools",
+          "icon": "$(tools)"
+        }
+      ]
+    },
+    "colors": [
+      {
+        "id": "arixa.keywords",
+        "description": "Keywords in Astra",
+        "colors": {
+          "keyword.control": "#569CD6",
+          "keyword.operator": "#D4D4D4",
+          "keyword.type": "#4EC9B0"
+        }
+      },
+      {
+        "id": "arixa.types",
+        "description": "Types in Astra",
+        "colors": {
+          "type.primitive": "#4EC9B0",
+          "type.user": "#9CDCFE",
+          "type.generic": "#BD8CFF"
+        }
+      },
+      {
+        "id": "arixa.functions",
+        "description": "Functions in Astra",
+        "colors": {
+          "function.declaration": "#DCDCAA",
+          "function.call": "#DCDCAA",
+          "function.builtin": "#569CD6"
+        }
+      },
+      {
+        "id": "arixa.gpu",
+        "description": "GPU development features",
+        "colors": {
+          "gpu.kernel": "#FF6B6B",
+          "gpu.builtin": "#4EC9B0"
+        }
+      }
+    ],
+    "debuggers": [
+      {
+        "type": "astra",
+        "label": "Astra Debug",
+        "program": "./debugger/astra-debug-adapter.js",
+        "runtime": "node",
+        "configurationAttributes": {
+          "launch": {
+            "required": ["program"],
+            "properties": {
+              "program": {
+                "type": "string",
+                "description": "Path to the Astra program to debug"
+              },
+              "target": {
+                "type": "string",
+                "enum": ["native", "llvm", "gpu"],
+                "default": "native",
+                "description": "Compilation target for debugging"
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": [],
+                "description": "Arguments to pass to the program"
+              },
+              "cwd": {
+                "type": "string",
+                "description": "Working directory for the debugged program"
+              },
+              "env": {
+                "type": "object",
+                "description": "Environment variables for the debugged program"
+              },
+              "stopOnEntry": {
+                "type": "boolean",
+                "default": true,
+                "description": "Automatically stop after launch"
+              }
+            }
+          },
+          "attach": {
+            "properties": {
+              "processId": {
+                "type": "number",
+                "description": "Process ID to attach to"
+              },
+              "port": {
+                "type": "number",
+                "default": 4711,
+                "description": "Port to connect to"
+              }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "type": "astra",
+            "name": "Debug Astra Program",
+            "request": "launch",
+            "program": "${workspaceFolder}/${command:AskForProgramName}",
+            "target": "native",
+            "stopOnEntry": true
+          },
+          {
+            "type": "astra",
+            "name": "Debug GPU Program",
+            "request": "launch",
+            "program": "${workspaceFolder}/${command:AskForProgramName}",
+            "target": "gpu",
+            "stopOnEntry": true
+          }
+        ]
+      }
+    ]
   },
   "scripts": {
     "bundle-server": "node ./scripts/bundle-server.js",

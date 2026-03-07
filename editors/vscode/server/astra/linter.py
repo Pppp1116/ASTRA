@@ -51,7 +51,7 @@ def _collect_targets(path: str) -> list[Path]:
     if target.is_file():
         return [target]
     if target.is_dir():
-        files = [p for p in target.rglob("*.astra") if p.is_file()]
+        files = [p for p in target.rglob("*.arixa") if p.is_file()]
         files.sort(key=lambda p: p.as_posix())
         return files
     raise FileNotFoundError(path)
@@ -77,7 +77,7 @@ def main(argv=None):
         src = fp.read_text()
         text_errs = lint_text(src)
         errs.extend((str(fp), ln, msg) for ln, msg in text_errs)
-        if not ns.no_semantic and fp.suffix == ".astra":
+        if not ns.no_semantic and fp.suffix == ".arixa":
             sem_errs = lint_semantic(src, str(fp))
             errs.extend((str(fp), ln, msg) for ln, msg in sem_errs)
     if errs:

@@ -16,7 +16,7 @@ _MANIFEST = "Astra.toml"
 _LOCKFILE = "Astra.lock"
 _STDLIB_ENV = "ASTRA_STDLIB_PATH"
 _RUNTIME_ENV = "ASTRA_RUNTIME_C_PATH"
-_PKG_HOME_ENV = "ASTRA_PKG_HOME"
+_PKG_HOME_ENV = "ARIXA_PKG_HOME"
 _PACKAGE_ROOT = Path(__file__).resolve().parent
 _REPO_ROOT = _PACKAGE_ROOT.parent
 
@@ -108,7 +108,7 @@ def package_cache_root() -> Path:
     env = os.environ.get(_PKG_HOME_ENV)
     if env:
         return Path(env).expanduser().resolve()
-    return (Path.home() / ".astra" / "packages").resolve()
+    return (Path.home() / ".arixa" / "packages").resolve()
 
 
 def resolve_import_path(decl: ImportDecl, from_filename: str) -> Path:
@@ -127,7 +127,7 @@ def resolve_import_path(decl: ImportDecl, from_filename: str) -> Path:
     else:
         target = _resolve_module_import(decl.path, from_filename, label)
     if target.suffix == "":
-        target = target.with_suffix(".astra")
+        target = target.with_suffix(".arixa")
     target = target.resolve()
     if not target.exists():
         raise ModuleResolutionError(f"cannot resolve import {label}")
@@ -144,8 +144,8 @@ def _resolve_string_import(source: str, from_filename: str) -> Path:
     # Relative file/module import from the importer directory.
     rel_candidates: list[Path] = [importer_dir / rel]
     if rel.suffix == "":
-        rel_candidates.append((importer_dir / rel).with_suffix(".astra"))
-        rel_candidates.append(importer_dir / rel / "mod.astra")
+        rel_candidates.append((importer_dir / rel).with_suffix(".arixa"))
+        rel_candidates.append(importer_dir / rel / "mod.arixa")
     for cand in rel_candidates:
         if cand.exists():
             return cand
@@ -153,14 +153,14 @@ def _resolve_string_import(source: str, from_filename: str) -> Path:
     # Import from stdlib bindings and root stdlib modules.
     stdlib_root = stdlib_root_path()
     if stdlib_root is not None and rel.suffix == "":
-        binding = stdlib_root / "bindings" / f"{source}.astra"
+        binding = stdlib_root / "bindings" / f"{source}.arixa"
         if binding.exists():
             return binding
-        std_mod = stdlib_root / f"{source}.astra"
+        std_mod = stdlib_root / f"{source}.arixa"
         if std_mod.exists():
             return std_mod
 
-    # Import from package cache (~/.astra/packages/<name>/<version>/...).
+    # Import from package cache (~/.arixa/packages/<name>/<version>/...).
     if rel.suffix == "":
         project_root = find_project_root(from_filename) if from_filename != "<input>" else find_project_root(str(Path.cwd()))
         source_norm = source.replace("\\", "/")
@@ -188,18 +188,18 @@ def _resolve_string_import(source: str, from_filename: str) -> Path:
 def _package_module_candidate(pkg_version_dir: Path, name: str, subpath: str = "") -> Path | None:
     if subpath:
         cands = [
-            pkg_version_dir / f"{subpath}.astra",
-            pkg_version_dir / subpath / "mod.astra",
-            pkg_version_dir / "bindings" / f"{subpath}.astra",
-            pkg_version_dir / name / f"{subpath}.astra",
-            pkg_version_dir / name / subpath / "mod.astra",
+            pkg_version_dir / f"{subpath}.arixa",
+            pkg_version_dir / subpath / "mod.arixa",
+            pkg_version_dir / "bindings" / f"{subpath}.arixa",
+            pkg_version_dir / name / f"{subpath}.arixa",
+            pkg_version_dir / name / subpath / "mod.arixa",
         ]
     else:
         cands = [
-            pkg_version_dir / f"{name}.astra",
-            pkg_version_dir / "bindings" / f"{name}.astra",
-            pkg_version_dir / name / "mod.astra",
-            pkg_version_dir / "mod.astra",
+            pkg_version_dir / f"{name}.arixa",
+            pkg_version_dir / "bindings" / f"{name}.arixa",
+            pkg_version_dir / name / "mod.arixa",
+            pkg_version_dir / "mod.arixa",
         ]
     for cand in cands:
         if cand.exists():

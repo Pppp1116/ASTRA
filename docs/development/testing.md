@@ -1,23 +1,39 @@
-# Development Testing Guide
+# Testing
 
-Core commands:
+## Test Framework
+
+Astra uses `pytest` for unit, integration, and end-to-end validation.
+
+## Main Commands
 
 ```bash
 pytest -q
-make test
+pytest -q --cov=astra --cov-report=term-missing
 ```
 
-Targeted runs:
+CLI wrapper command:
 
 ```bash
-pytest tests/test_parser.py -q
-pytest tests/test_semantic.py -q
-pytest tests/test_build.py -k native -q
+astra test --kind unit
+astra test --kind integration
+astra test --kind e2e
 ```
 
-For CLI behavior:
+## Specialized Suites
 
-```bash
-astra check examples/hello_world.astra
-astra build examples/hello_world.astra -o build/hello.py
-```
+- Property-based tests: `tests/test_property_fuzz.py`
+- Native backend coverage: `pytest tests/test_build.py -k native`
+- LSP/tooling tests: `tests/test_lsp_server.py`, `tests/test_tools.py`
+
+## Expected Baseline
+
+Before opening a PR:
+
+1. `make fmt-check`
+2. `make lint`
+3. `make test`
+
+## Test Data
+
+- `examples/` and `benchmarks/` provide language-level fixtures.
+- `tests/` contains phase-specific checks (lexer/parser/semantic/codegen/tooling).

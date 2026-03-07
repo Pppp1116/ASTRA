@@ -885,7 +885,7 @@ class LSPServer:
         for root in self.workspace_folders:
             if not root.exists():
                 continue
-            for path in root.rglob("*.astra"):
+            for path in root.rglob("*.arixa"):
                 uri = path.resolve().as_uri()
                 if uri in self.docs:
                     continue
