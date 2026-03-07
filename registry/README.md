@@ -1,6 +1,6 @@
-# ASTRA Package Registry
+# ARIXA Package Registry
 
-This directory contains the canonical package index used by `astpm`.
+This directory contains the canonical package index used by `arpm`.
 It also contains toolchain update metadata used by the VS Code extension.
 
 ## Format
@@ -38,12 +38,12 @@ It also contains toolchain update metadata used by the VS Code extension.
 
 ## Add a package
 
-1. Publish your package repository with a valid `Astra.toml`.
+1. Publish your package repository with a valid `Arixa.toml`.
 2. Add an entry to `registry/packages.json`.
-3. Open a pull request against the ASTRA repository.
+3. Open a pull request against the ARIXA repository.
 
 Package naming should use lowercase ASCII and match the import name users write:
 
-```astra
+```arixa
 import "yourpkg";
 ```

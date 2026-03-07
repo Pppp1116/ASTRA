@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Refresh the VS Code extension bundled ASTRA server copy."""
+"""Refresh the VS Code extension bundled ARIXA server copy."""
 
 from __future__ import annotations
 

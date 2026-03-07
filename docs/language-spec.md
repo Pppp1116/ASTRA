@@ -1,4 +1,4 @@
-# Astra Formal Language Specification
+# Arixa Formal Language Specification
 
 ## Syntax
 

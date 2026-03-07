@@ -6,7 +6,7 @@
       "    ${0}",
       "}"
     ],
-    "description": "Declare an Astra function"
+    "description": "Declare an Arixa function"
   },
   "If Else": {
     "prefix": "if",

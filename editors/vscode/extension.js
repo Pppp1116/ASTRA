@@ -26,7 +26,7 @@ const UPDATE_LAST_PROMPT_KEY = 'toolchain.update.lastPromptVersion';
 const POSIX_LAUNCHER = `#!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-PY="\${ASTRA_PYTHON:-python3}"
+PY="\${ARIXA_PYTHON:-python3}"
 if ! command -v "$PY" >/dev/null 2>&1; then
   PY="python"
 fi
@@ -39,8 +39,8 @@ exec "$PY" -m $MODULE "$@"
 function windowsLauncher(moduleName) {
   return `@echo off
 set "ROOT=%~dp0.."
-if defined ASTRA_PYTHON (
-  set "PY=%ASTRA_PYTHON%"
+if defined ARIXA_PYTHON (
+  set "PY=%ARIXA_PYTHON%"
 ) else (
   set "PY=python"
 )
@@ -52,7 +52,7 @@ set "ARIXA_RUNTIME_C_PATH=%ROOT%\\astra\\assets\\runtime\\llvm_runtime.c"
 }
 
 function getConfig() {
-  return vscode.workspace.getConfiguration('astra');
+  return vscode.workspace.getConfiguration('arixa');
 }
 
 function parseVersion(versionText) {
@@ -168,18 +168,18 @@ function ensureGlobalToolchain(context) {
 
   const binDir = path.join(root, 'bin');
   fs.mkdirSync(binDir, { recursive: true });
-  writeFileIfChanged(path.join(binDir, 'astra'), renderPosixLauncher('astra.cli'), true);
-  writeFileIfChanged(path.join(binDir, 'astlsp'), renderPosixLauncher('astra.lsp'), true);
-  writeFileIfChanged(path.join(binDir, 'astpm'), renderPosixLauncher('astra.pkg'), true);
-  writeFileIfChanged(path.join(binDir, 'astra.cmd'), windowsLauncher('astra.cli'));
-  writeFileIfChanged(path.join(binDir, 'astlsp.cmd'), windowsLauncher('astra.lsp'));
-  writeFileIfChanged(path.join(binDir, 'astpm.cmd'), windowsLauncher('astra.pkg'));
+  writeFileIfChanged(path.join(binDir, 'arixa'), renderPosixLauncher('astra.cli'), true);
+  writeFileIfChanged(path.join(binDir, 'arlsp'), renderPosixLauncher('astra.lsp'), true);
+  writeFileIfChanged(path.join(binDir, 'arpm'), renderPosixLauncher('astra.pkg'), true);
+  writeFileIfChanged(path.join(binDir, 'arixa.cmd'), windowsLauncher('astra.cli'));
+  writeFileIfChanged(path.join(binDir, 'arlsp.cmd'), windowsLauncher('astra.lsp'));
+  writeFileIfChanged(path.join(binDir, 'arpm.cmd'), windowsLauncher('astra.pkg'));
   return root;
 }
 
 function ensureOutput(context) {
   if (!output) {
-    output = vscode.window.createOutputChannel('Astra');
+    output = vscode.window.createOutputChannel('Arixa');
     context.subscriptions.push(output);
   }
   return output;
@@ -188,10 +188,10 @@ function ensureOutput(context) {
 function ensureStatusBar(context) {
   if (!statusBar) {
     statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 40);
-    statusBar.name = 'Astra Language Server';
-    statusBar.command = 'astra.showLanguageServerStatus';
-    statusBar.text = '$(sync~spin) Astra: starting';
-    statusBar.tooltip = 'Astra language server';
+    statusBar.name = 'Arixa Language Server';
+    statusBar.command = 'arixa.showLanguageServerStatus';
+    statusBar.text = '$(sync~spin) Arixa: starting';
+    statusBar.tooltip = 'Arixa language server';
     statusBar.show();
     context.subscriptions.push(statusBar);
   }
@@ -265,7 +265,7 @@ function bundledServer(context) {
     options: {
       env: {
         ...process.env,
-        ASTRA_STDLIB_PATH: stdlibPath
+        ARIXA_STDLIB_PATH: stdlibPath
       }
     }
   };
@@ -317,7 +317,7 @@ function resolveServer(context) {
       currentServer = { mode: 'external', command: external.command, args: external.args || [] };
       return external;
     }
-    throw new Error('Astra is configured for external server mode, but astra.languageServer.command is empty.');
+    throw new Error('Arixa is configured for external server mode, but arixa.languageServer.command is empty.');
   }
 
   const globalServer = globalToolchainServer(context);
@@ -344,7 +344,7 @@ function resolveServer(context) {
     return external;
   }
 
-  throw new Error('Could not start bundled Astra server. Install Python 3.11+ or set astra.languageServer.command.');
+  throw new Error('Could not start bundled Arixa server. Install Python 3.11+ or set arixa.languageServer.command.');
 }
 
 function bundledCompiler(context) {
@@ -368,8 +368,8 @@ function bundledCompiler(context) {
     options: {
       env: {
         ...process.env,
-        ASTRA_STDLIB_PATH: stdlibPath,
-        ASTRA_RUNTIME_C_PATH: runtimePath
+        ARIXA_STDLIB_PATH: stdlibPath,
+        ARIXA_RUNTIME_C_PATH: runtimePath
       }
     }
   };
@@ -390,7 +390,7 @@ function workspaceToolchainCompiler() {
   if (!root) {
     return undefined;
   }
-  const binName = process.platform === 'win32' ? 'astra.cmd' : 'astra';
+  const binName = process.platform === 'win32' ? 'arixa.cmd' : 'arixa';
   const exe = path.join(root, 'dist', 'toolchain', 'bin', binName);
   if (!fs.existsSync(exe)) {
     return undefined;
@@ -403,7 +403,7 @@ function globalToolchainCompiler(context) {
   if (!root) {
     return undefined;
   }
-  const binName = process.platform === 'win32' ? 'astra.cmd' : 'astra';
+  const binName = process.platform === 'win32' ? 'arixa.cmd' : 'arixa';
   const exe = path.join(root, 'bin', binName);
   if (!fs.existsSync(exe)) {
     return undefined;
@@ -420,7 +420,7 @@ function resolveCompiler(context) {
       currentCompiler = { mode: 'external', command: external.command, args: external.args || [] };
       return external;
     }
-    throw new Error('Astra compiler is configured for external mode, but astra.compiler.command is empty.');
+    throw new Error('Arixa compiler is configured for external mode, but arixa.compiler.command is empty.');
   }
 
   const globalCompiler = globalToolchainCompiler(context);
@@ -447,7 +447,7 @@ function resolveCompiler(context) {
     return external;
   }
 
-  throw new Error('Could not start bundled Astra compiler. Install Python 3.11+ or set astra.compiler.command.');
+  throw new Error('Could not start bundled Arixa compiler. Install Python 3.11+ or set arixa.compiler.command.');
 }
 
 function spawnAndCapture(executable, args, cwd, channel) {
@@ -496,12 +496,12 @@ function defaultBuildOutput(srcPath, target, outputDir) {
 
 async function buildCurrentFile(context) {
   const editor = vscode.window.activeTextEditor;
-  if (!editor || editor.document.languageId !== 'astra') {
-    void vscode.window.showErrorMessage('Open an Astra file to build.');
+  if (!editor || editor.document.languageId !== 'arixa') {
+    void vscode.window.showErrorMessage('Open an Arixa file to build.');
     return;
   }
   if (editor.document.uri.scheme !== 'file') {
-    void vscode.window.showErrorMessage('Save this Astra file to disk before building.');
+    void vscode.window.showErrorMessage('Save this Arixa file to disk before building.');
     return;
   }
   if (editor.document.isDirty) {
@@ -514,7 +514,7 @@ async function buildCurrentFile(context) {
 
   const config = getConfig();
   const target = config.get('compiler.target', 'native');
-  const outputDirSetting = config.get('compiler.outputDir', '.astra-build').trim() || '.astra-build';
+  const outputDirSetting = config.get('compiler.outputDir', '.arixa-build').trim() || '.arixa-build';
   const extraArgsRaw = config.get('compiler.buildArgs', []);
   const extraArgs = Array.isArray(extraArgsRaw) ? extraArgsRaw.filter((arg) => typeof arg === 'string') : [];
   const sourcePath = editor.document.uri.fsPath;
@@ -536,10 +536,10 @@ async function buildCurrentFile(context) {
   try {
     await spawnAndCapture(compiler, args, baseDir, channel);
     channel.appendLine('build finished successfully');
-    void vscode.window.showInformationMessage(`Astra build succeeded: ${path.basename(outputPath)}`);
+    void vscode.window.showInformationMessage(`Arixa build succeeded: ${path.basename(outputPath)}`);
   } catch (error) {
     channel.appendLine(`build failed: ${String(error)}`);
-    void vscode.window.showErrorMessage(`Astra build failed: ${String(error)}`);
+    void vscode.window.showErrorMessage(`Arixa build failed: ${String(error)}`);
   }
 }
 
@@ -550,9 +550,9 @@ function attachClientStateLogging() {
   client.onDidChangeState((event) => {
     output.appendLine(`state: ${event.oldState} -> ${event.newState}`);
     if (event.newState === State.Running) {
-      setStatus('$(check) Astra: ready', 'Astra language server is running');
+      setStatus('$(check) Arixa: ready', 'Arixa language server is running');
     } else {
-      setStatus('$(warning) Astra: stopped', 'Astra language server is not running');
+      setStatus('$(warning) Arixa: stopped', 'Arixa language server is not running');
     }
   });
 }
@@ -560,7 +560,7 @@ function attachClientStateLogging() {
 async function startClient(context) {
   const channel = ensureOutput(context);
   ensureStatusBar(context);
-  setStatus('$(sync~spin) Astra: starting', 'Starting Astra language server');
+  setStatus('$(sync~spin) Arixa: starting', 'Starting Arixa language server');
 
   const executable = resolveServer(context);
   channel.appendLine(`starting server (${currentServer.mode}): ${executable.command} ${(executable.args || []).join(' ')}`);
@@ -572,16 +572,16 @@ async function startClient(context) {
 
   const clientOptions = {
     documentSelector: [
-      { scheme: 'file', language: 'astra' },
-      { scheme: 'untitled', language: 'astra' }
+      { scheme: 'file', language: 'arixa' },
+      { scheme: 'untitled', language: 'arixa' }
     ],
     outputChannel: channel,
     synchronize: {
-      fileEvents: vscode.workspace.createFileSystemWatcher('**/*.astra')
+      fileEvents: vscode.workspace.createFileSystemWatcher('**/*.arixa')
     }
   };
 
-  client = new LanguageClient('astra-lsp', 'Astra Language Server', serverOptions, clientOptions);
+  client = new LanguageClient('arixa-lsp', 'Arixa Language Server', serverOptions, clientOptions);
   client.setTrace(mapTrace(getConfig().get('trace.server', 'off')));
   attachClientStateLogging();
   context.subscriptions.push(client.start());

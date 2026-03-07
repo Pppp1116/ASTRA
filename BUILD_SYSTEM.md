@@ -4,9 +4,9 @@
 
 Build metadata is defined in `pyproject.toml`:
 
-- package: `astra-lang`
+- package: `arixa-lang`
 - Python requirement: `>=3.11`
-- scripts: `astra`, `astpm`, `astfmt`, `astlint`, `astdoc`, `astlsp`, `astdbg`, `astprof`
+- scripts: `arixa`, `arpm`, `arfmt`, `arlint`, `ardoc`, `arlsp`, `ardbg`, `arprof`
 - package data: bundled stdlib and runtime C asset
 
 ## Compiler Build Command
@@ -14,7 +14,7 @@ Build metadata is defined in `pyproject.toml`:
 Main command:
 
 ```bash
-astra build <input> -o <output> [--target py|llvm|native] [--kind exe|lib]
+arixa build <input> -o <output> [--target py|llvm|native] [--kind exe|lib]
 ```
 
 Useful flags:
@@ -28,7 +28,7 @@ Useful flags:
 
 ## Build Caching
 
-Cache file: `.astra-cache.json`.
+Cache file: `.arixa-cache.json`.
 
 Fingerprints include source imports, compiler source hashes, stdlib/runtime assets, and selected build flags.
 
@@ -44,5 +44,5 @@ Fingerprints include source imports, compiler source hashes, stdlib/runtime asse
 
 ## Environment Variables
 
-- `ASTRA_STDLIB_PATH`: override stdlib root
-- `ASTRA_RUNTIME_C_PATH`: override runtime C source for native linking
+- `ARIXA_STDLIB_PATH`: override stdlib root
+- `ARIXA_RUNTIME_C_PATH`: override runtime C source for native linking

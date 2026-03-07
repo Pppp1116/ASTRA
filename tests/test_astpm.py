@@ -31,7 +31,7 @@ def _write_multi_registry(path: Path, pkg_name: str, repos_by_version: dict[str,
 def test_astpm_search_uses_registry(monkeypatch, tmp_path: Path, capsys):
     reg = tmp_path / "packages.json"
     _write_registry(reg, "sdl2", "https://example.invalid/astra-sdl2", "2.0.0")
-    monkeypatch.setenv("ASTRA_REGISTRY_PATH", str(reg))
+    monkeypatch.setenv("ARIXA_REGISTRY_PATH", str(reg))
 
     astra.pkg.main(["search", "sdl2"])
     out = capsys.readouterr().out
@@ -43,9 +43,9 @@ def test_astpm_fetch_registry_uses_cache_fallback(monkeypatch, tmp_path: Path):
     cache_file.write_text(
         json.dumps({"cached_pkg": {"repo": "https://example.invalid/repo", "version": "1.0.0"}})
     )
-    monkeypatch.setenv("ASTRA_REGISTRY_CACHE", str(cache_file))
-    monkeypatch.setenv("ASTRA_REGISTRY_URL", "http://127.0.0.1:9/registry.json")
-    monkeypatch.delenv("ASTRA_REGISTRY_PATH", raising=False)
+    monkeypatch.setenv("ARIXA_REGISTRY_CACHE", str(cache_file))
+    monkeypatch.setenv("ARIXA_REGISTRY_URL", "http://127.0.0.1:9/registry.json")
+    monkeypatch.delenv("ARIXA_REGISTRY_PATH", raising=False)
 
     data = astra.pkg._fetch_registry()
     assert "cached_pkg" in data
@@ -55,7 +55,7 @@ def test_astpm_lock_resolves_semver_constraints(monkeypatch, tmp_path: Path):
     project = tmp_path / "app"
     project.mkdir(parents=True)
     monkeypatch.chdir(project)
-    monkeypatch.setenv("ASTRA_PKG_HOME", str(tmp_path / "cache"))
+    monkeypatch.setenv("ARIXA_PKG_HOME", str(tmp_path / "cache"))
 
     pkg_v1 = tmp_path / "pkgdemo-v1"
     pkg_v1.mkdir()
@@ -66,7 +66,7 @@ def test_astpm_lock_resolves_semver_constraints(monkeypatch, tmp_path: Path):
 
     reg = tmp_path / "packages.json"
     _write_multi_registry(reg, "pkgdemo", {"1.2.0": str(pkg_v1), "1.9.3": str(pkg_v2), "2.1.0": str(pkg_v2)})
-    monkeypatch.setenv("ASTRA_REGISTRY_PATH", str(reg))
+    monkeypatch.setenv("ARIXA_REGISTRY_PATH", str(reg))
 
     astra.pkg.main(["init", "demo"])
     astra.pkg.main(["add", "pkgdemo", "^1.0.0"])
@@ -83,7 +83,7 @@ def test_astpm_lock_includes_transitive_dependencies(monkeypatch, tmp_path: Path
     project.mkdir(parents=True)
     monkeypatch.chdir(project)
     cache = tmp_path / "cache"
-    monkeypatch.setenv("ASTRA_PKG_HOME", str(cache))
+    monkeypatch.setenv("ARIXA_PKG_HOME", str(cache))
 
     dep_repo = tmp_path / "dep_repo"
     dep_repo.mkdir()
@@ -106,7 +106,7 @@ def test_astpm_lock_includes_transitive_dependencies(monkeypatch, tmp_path: Path
             }
         )
     )
-    monkeypatch.setenv("ASTRA_REGISTRY_PATH", str(reg))
+    monkeypatch.setenv("ARIXA_REGISTRY_PATH", str(reg))
 
     astra.pkg.main(["init", "demo"])
     astra.pkg.main(["add", "root", "^1.0.0"])
@@ -128,8 +128,8 @@ def test_astpm_add_remove_cycle(monkeypatch, tmp_path: Path):
 
     reg = tmp_path / "packages.json"
     _write_registry(reg, "sdl2", str(pkg_repo), "2.0.0")
-    monkeypatch.setenv("ASTRA_REGISTRY_PATH", str(reg))
-    monkeypatch.setenv("ASTRA_PKG_HOME", str(tmp_path / "cache"))
+    monkeypatch.setenv("ARIXA_REGISTRY_PATH", str(reg))
+    monkeypatch.setenv("ARIXA_PKG_HOME", str(tmp_path / "cache"))
     monkeypatch.chdir(project)
 
     astra.pkg.main(["init", "demo"])
@@ -153,7 +153,7 @@ def test_import_resolution_uses_installed_package_cache(monkeypatch, tmp_path: P
     pkg_dir = cache / "pkgdemo" / "2.0.0"
     pkg_dir.mkdir(parents=True)
     (pkg_dir / "pkgdemo.astra").write_text('@link("pkgdemo") extern fn demo_init(flags u32) i32;\n')
-    monkeypatch.setenv("ASTRA_PKG_HOME", str(cache))
+    monkeypatch.setenv("ARIXA_PKG_HOME", str(cache))
 
     resolved = resolve_import_path(ImportDecl(path=[], source="pkgdemo"), str(project / "main.astra"))
     assert resolved == (pkg_dir / "pkgdemo.astra").resolve()
@@ -163,7 +163,7 @@ def test_import_resolution_prefers_lockfile_version(monkeypatch, tmp_path: Path)
     project = tmp_path / "app"
     project.mkdir(parents=True)
     cache = tmp_path / "cache"
-    monkeypatch.setenv("ASTRA_PKG_HOME", str(cache))
+    monkeypatch.setenv("ARIXA_PKG_HOME", str(cache))
     (project / "Astra.toml").write_text('name = "demo"\n[dependencies]\npkgdemo = "^1.0.0"\n')
     (project / "Astra.lock").write_text(
         json.dumps(
@@ -193,7 +193,7 @@ def test_build_with_dependency_auto_adds_native_link_flags(monkeypatch, tmp_path
     project = tmp_path / "app"
     project.mkdir(parents=True)
     cache = tmp_path / "cache"
-    monkeypatch.setenv("ASTRA_PKG_HOME", str(cache))
+    monkeypatch.setenv("ARIXA_PKG_HOME", str(cache))
 
     (project / "Astra.toml").write_text(
         '[project]\nname = "app"\nversion = "0.1.0"\n[dependencies]\npkgdemo = "2.0.0"\n'
@@ -233,7 +233,7 @@ def test_build_uses_project_package_link_overrides(monkeypatch, tmp_path: Path):
     project = tmp_path / "app"
     project.mkdir(parents=True)
     cache = tmp_path / "cache"
-    monkeypatch.setenv("ASTRA_PKG_HOME", str(cache))
+    monkeypatch.setenv("ARIXA_PKG_HOME", str(cache))
 
     (project / "Astra.toml").write_text(
         '[project]\nname = "app"\nversion = "0.1.0"\n'
@@ -282,7 +282,7 @@ def test_astpm_verify_checks_cached_checksum(monkeypatch, tmp_path: Path, capsys
     project.mkdir(parents=True)
     cache = tmp_path / "cache"
     monkeypatch.chdir(project)
-    monkeypatch.setenv("ASTRA_PKG_HOME", str(cache))
+    monkeypatch.setenv("ARIXA_PKG_HOME", str(cache))
 
     pkg_dir = cache / "pkgdemo" / "1.0.0"
     pkg_dir.mkdir(parents=True)

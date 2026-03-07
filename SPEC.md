@@ -1,4 +1,4 @@
-# Astra Language Spec (Implementation-Facing)
+# Arixa Language Spec (Implementation-Facing)
 
 This document defines the current language contract in a single place for parser/semantic/codegen behavior.
 

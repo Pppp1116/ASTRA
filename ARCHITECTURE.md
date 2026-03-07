@@ -1,6 +1,6 @@
 # Architecture
 
-Astra is organized as a classic compiler pipeline plus toolchain commands around that pipeline.
+Arixa is organized as a classic compiler pipeline plus toolchain commands around that pipeline.
 
 ## High-Level Layout
 
@@ -14,7 +14,7 @@ Astra is organized as a classic compiler pipeline plus toolchain commands around
 ## Pipeline Diagram
 
 ```text
-source (.astra)
+source (.arixa)
     |
     v
 lex -> parse -> AST
