@@ -31,7 +31,7 @@ def _write_multi_registry(path: Path, pkg_name: str, repos_by_version: dict[str,
 def test_astpm_search_uses_registry(monkeypatch, tmp_path: Path, capsys):
     reg = tmp_path / "packages.json"
     _write_registry(reg, "sdl2", "https://example.invalid/astra-sdl2", "2.0.0")
-    monkeypatch.setenv("ARIXA_REGISTRY_PATH", str(reg))
+    monkeypatch.setenv("ASTRA_REGISTRY_PATH", str(reg))
 
     astra.pkg.main(["search", "sdl2"])
     out = capsys.readouterr().out
@@ -43,9 +43,9 @@ def test_astpm_fetch_registry_uses_cache_fallback(monkeypatch, tmp_path: Path):
     cache_file.write_text(
         json.dumps({"cached_pkg": {"repo": "https://example.invalid/repo", "version": "1.0.0"}})
     )
-    monkeypatch.setenv("ARIXA_REGISTRY_CACHE", str(cache_file))
-    monkeypatch.setenv("ARIXA_REGISTRY_URL", "http://127.0.0.1:9/registry.json")
-    monkeypatch.delenv("ARIXA_REGISTRY_PATH", raising=False)
+    monkeypatch.setenv("ASTRA_REGISTRY_CACHE", str(cache_file))
+    monkeypatch.setenv("ASTRA_REGISTRY_URL", "http://127.0.0.1:9/registry.json")
+    monkeypatch.delenv("ASTRA_REGISTRY_PATH", raising=False)
 
     data = astra.pkg._fetch_registry()
     assert "cached_pkg" in data
@@ -59,14 +59,14 @@ def test_astpm_lock_resolves_semver_constraints(monkeypatch, tmp_path: Path):
 
     pkg_v1 = tmp_path / "pkgdemo-v1"
     pkg_v1.mkdir()
-    (pkg_v1 / "pkgdemo.astra").write_text("fn v() Int{ return 1; }\n")
+    (pkg_v1 / "pkgdemo.arixa").write_text("fn v() Int{ return 1; }\n")
     pkg_v2 = tmp_path / "pkgdemo-v2"
     pkg_v2.mkdir()
-    (pkg_v2 / "pkgdemo.astra").write_text("fn v() Int{ return 2; }\n")
+    (pkg_v2 / "pkgdemo.arixa").write_text("fn v() Int{ return 2; }\n")
 
     reg = tmp_path / "packages.json"
     _write_multi_registry(reg, "pkgdemo", {"1.2.0": str(pkg_v1), "1.9.3": str(pkg_v2), "2.1.0": str(pkg_v2)})
-    monkeypatch.setenv("ARIXA_REGISTRY_PATH", str(reg))
+    monkeypatch.setenv("ASTRA_REGISTRY_PATH", str(reg))
 
     astra.pkg.main(["init", "demo"])
     astra.pkg.main(["add", "pkgdemo", "^1.0.0"])
@@ -88,14 +88,14 @@ def test_astpm_lock_includes_transitive_dependencies(monkeypatch, tmp_path: Path
     dep_repo = tmp_path / "dep_repo"
     dep_repo.mkdir()
     (dep_repo / "Astra.toml").write_text('[package]\nname = "dep"\nversion = "1.4.0"\n')
-    (dep_repo / "dep.astra").write_text("fn dep_ping() Int{ return 1; }\n")
+    (dep_repo / "dep.arixa").write_text("fn dep_ping() Int{ return 1; }\n")
 
     root_repo = tmp_path / "root_repo"
     root_repo.mkdir()
     (root_repo / "Astra.toml").write_text(
         '[package]\nname = "root"\nversion = "1.0.0"\n[dependencies]\ndep = "^1.0.0"\n'
     )
-    (root_repo / "root.astra").write_text("fn root_ping() Int{ return 2; }\n")
+    (root_repo / "root.arixa").write_text("fn root_ping() Int{ return 2; }\n")
 
     reg = tmp_path / "packages.json"
     reg.write_text(
@@ -106,7 +106,7 @@ def test_astpm_lock_includes_transitive_dependencies(monkeypatch, tmp_path: Path
             }
         )
     )
-    monkeypatch.setenv("ARIXA_REGISTRY_PATH", str(reg))
+    monkeypatch.setenv("ASTRA_REGISTRY_PATH", str(reg))
 
     astra.pkg.main(["init", "demo"])
     astra.pkg.main(["add", "root", "^1.0.0"])
@@ -124,11 +124,11 @@ def test_astpm_add_remove_cycle(monkeypatch, tmp_path: Path):
     (pkg_repo / "Astra.toml").write_text(
         "[package]\nname = \"sdl2\"\nversion = \"2.0.0\"\n[native]\nlibs = [\"SDL2\"]\n"
     )
-    (pkg_repo / "sdl2.astra").write_text('@link("SDL2") extern fn SDL_Init(flags u32) i32;\n')
+    (pkg_repo / "sdl2.arixa").write_text('@link("SDL2") extern fn SDL_Init(flags u32) i32;\n')
 
     reg = tmp_path / "packages.json"
     _write_registry(reg, "sdl2", str(pkg_repo), "2.0.0")
-    monkeypatch.setenv("ARIXA_REGISTRY_PATH", str(reg))
+    monkeypatch.setenv("ASTRA_REGISTRY_PATH", str(reg))
     monkeypatch.setenv("ARIXA_PKG_HOME", str(tmp_path / "cache"))
     monkeypatch.chdir(project)
 
@@ -136,7 +136,7 @@ def test_astpm_add_remove_cycle(monkeypatch, tmp_path: Path):
     astra.pkg.main(["add", "sdl2"])
     manifest = (project / "Astra.toml").read_text()
     assert 'sdl2 = "2.0.0"' in manifest
-    assert (tmp_path / "cache" / "sdl2" / "2.0.0" / "sdl2.astra").exists()
+    assert (tmp_path / "cache" / "sdl2" / "2.0.0" / "sdl2.arixa").exists()
 
     astra.pkg.main(["remove", "sdl2"])
     manifest2 = (project / "Astra.toml").read_text()
@@ -152,11 +152,11 @@ def test_import_resolution_uses_installed_package_cache(monkeypatch, tmp_path: P
     (project / "main.astra").write_text('import "pkgdemo";\nfn main() Int{ return 0; }\n')
     pkg_dir = cache / "pkgdemo" / "2.0.0"
     pkg_dir.mkdir(parents=True)
-    (pkg_dir / "pkgdemo.astra").write_text('@link("pkgdemo") extern fn demo_init(flags u32) i32;\n')
+    (pkg_dir / "pkgdemo.arixa").write_text('@link("pkgdemo") extern fn demo_init(flags u32) i32;\n')
     monkeypatch.setenv("ARIXA_PKG_HOME", str(cache))
 
     resolved = resolve_import_path(ImportDecl(path=[], source="pkgdemo"), str(project / "main.astra"))
-    assert resolved == (pkg_dir / "pkgdemo.astra").resolve()
+    assert resolved == (pkg_dir / "pkgdemo.arixa").resolve()
 
 
 def test_import_resolution_prefers_lockfile_version(monkeypatch, tmp_path: Path):
@@ -183,10 +183,10 @@ def test_import_resolution_prefers_lockfile_version(monkeypatch, tmp_path: Path)
     (project / "main.astra").write_text('import "pkgdemo";\nfn main() Int{ return 0; }\n')
     pkg_dir = cache / "pkgdemo" / "1.9.3"
     pkg_dir.mkdir(parents=True)
-    (pkg_dir / "pkgdemo.astra").write_text("fn ping() Int{ return 0; }\n")
+    (pkg_dir / "pkgdemo.arixa").write_text("fn ping() Int{ return 0; }\n")
 
     resolved = resolve_import_path(ImportDecl(path=[], source="pkgdemo"), str(project / "main.astra"))
-    assert resolved == (pkg_dir / "pkgdemo.astra").resolve()
+    assert resolved == (pkg_dir / "pkgdemo.arixa").resolve()
 
 
 def test_build_with_dependency_auto_adds_native_link_flags(monkeypatch, tmp_path: Path):
@@ -205,7 +205,7 @@ def test_build_with_dependency_auto_adds_native_link_flags(monkeypatch, tmp_path
     (pkg_dir / "Astra.toml").write_text(
         "[package]\nname = \"pkgdemo\"\nversion = \"2.0.0\"\n[native]\nlibs = [\"demoffi\"]\n"
     )
-    (pkg_dir / "pkgdemo.astra").write_text('@link("demoffi") extern fn demo_init(flags u32) i32;\n')
+    (pkg_dir / "pkgdemo.arixa").write_text('@link("demoffi") extern fn demo_init(flags u32) i32;\n')
 
     seen_cmds: list[list[str]] = []
 
@@ -247,7 +247,7 @@ def test_build_uses_project_package_link_overrides(monkeypatch, tmp_path: Path):
     (pkg_dir / "Astra.toml").write_text(
         "[package]\nname = \"pkgdemo\"\nversion = \"2.0.0\"\n[native]\nlibs = [\"demoffi\"]\n"
     )
-    (pkg_dir / "pkgdemo.astra").write_text('extern fn demo_init(flags u32) Int;\n')
+    (pkg_dir / "pkgdemo.arixa").write_text('extern fn demo_init(flags u32) Int;\n')
 
     seen_cmds: list[list[str]] = []
 
@@ -286,7 +286,7 @@ def test_astpm_verify_checks_cached_checksum(monkeypatch, tmp_path: Path, capsys
 
     pkg_dir = cache / "pkgdemo" / "1.0.0"
     pkg_dir.mkdir(parents=True)
-    (pkg_dir / "pkgdemo.astra").write_text("fn ping() Int{ return 0; }\n")
+    (pkg_dir / "pkgdemo.arixa").write_text("fn ping() Int{ return 0; }\n")
     digest = astra.pkg._dir_digest(pkg_dir)
     (project / "Astra.lock").write_text(
         json.dumps(

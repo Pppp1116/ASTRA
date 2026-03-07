@@ -57,15 +57,15 @@ fn main() Int{
 
 def test_try_operator_propagates_union_err_and_short_circuits(tmp_path) -> None:
     src = """
-fn parse(v Int) Int | Int{
+fn parse(v Int) Int | none{
   if v > 0 {
     return v;
   }
   else {}
-  return 404;
+  return none;
 }
 
-fn add1(v Int) Int | Int{
+fn add1(v Int) Int | none{
   x = parse(v)!;
   print("after-ok");
   return x + 1;
@@ -88,7 +88,7 @@ fn main() Int{
         expected_stdout=(
             "after-ok\n"
             "3\n"
-            "404\n"
+            "null\n"
         ),
         expected_returncode=0,
     )
@@ -96,15 +96,15 @@ fn main() Int{
 
 def test_try_operator_union_propagation_matches_py_and_native(tmp_path) -> None:
     src = """
-fn parse(v Int) Int | Int{
+fn parse(v Int) Int | none{
   if v > 0 {
     return v;
   }
   else {}
-  return 1;
+  return none;
 }
 
-fn helper(v Int) Int | Int{
+fn helper(v Int) Int | none{
   x = parse(v)!;
   print("after");
   return x + 1;

@@ -350,7 +350,7 @@ def test_semantic_allows_module_without_main():
 
 def test_selfhost_source_compiles_to_python(tmp_path: Path):
     out = tmp_path / "selfhost.py"
-    state = build("selfhost/compiler.astra", str(out), "py")
+    state = build("selfhost/compiler.arixa", str(out), "py")
     assert state in {"built", "cached"}
     text = out.read_text()
     assert "def compile(input, output):" in text

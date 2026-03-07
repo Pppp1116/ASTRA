@@ -104,8 +104,8 @@ fn main() Int{
   mut v: Vec<Int> = vec_new() as Vec<Int>;
   drop vec_push(v, 10);
   drop vec_push(v, 20);
-  a: Option<Int> = vec_get(v, 0);
-  b: Option<Int> = vec_get(v, 99);
+  a: Int? = vec_get(v, 0);
+  b: Int? = vec_get(v, 99);
   return (a ?? 0) + (b ?? 3) + vec_len(v);
 }
 """,

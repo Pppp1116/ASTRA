@@ -109,7 +109,7 @@ def test_build_rejects_sanitizer_for_non_native_targets(tmp_path: Path):
 
 def test_build_cache_invalidates_when_imported_module_changes(tmp_path: Path):
     src = tmp_path / "main.astra"
-    dep = tmp_path / "helper.astra"
+    dep = tmp_path / "helper.arixa"
     out = tmp_path / "main.py"
     dep.write_text("fn helper() Int{ return 1; }")
     src.write_text(
@@ -130,7 +130,7 @@ fn main() Int{ return 0; }
 def test_build_cache_invalidates_when_string_imported_module_changes(tmp_path: Path):
     src = tmp_path / "main.astra"
     dep_dir = tmp_path / "deps"
-    dep = dep_dir / "helper.astra"
+    dep = dep_dir / "helper.arixa"
     out = tmp_path / "main.py"
     dep_dir.mkdir()
     dep.write_text("fn helper() Int{ return 1; }")
@@ -151,7 +151,7 @@ fn main() Int{ return 0; }
 
 def test_build_py_can_call_functions_from_imported_module(tmp_path: Path):
     src = tmp_path / "main.astra"
-    dep = tmp_path / "helper.astra"
+    dep = tmp_path / "helper.arixa"
     out = tmp_path / "main.py"
     dep.write_text("fn helper(v Int) Int{ return v + 2; }")
     src.write_text(
@@ -241,13 +241,13 @@ def test_build_strict_mode_accepts_union_try_operator(tmp_path: Path):
     out = tmp_path / "strict_try_union.py"
     src.write_text(
         """
-fn helper(v Int) Int | Int{
+fn helper(v Int) Int | none{
   if v > 0 { return v; } else {}
-  return 1;
+  return none;
 }
-fn wrap(v Int) Int | Int{
+fn wrap(v Int) Int | none{
   x = helper(v)!;
-  return x;
+  return x + 1;
 }
 fn main() Int{
   _ = wrap(1);

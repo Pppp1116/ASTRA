@@ -183,7 +183,7 @@ def test_cli_fmt_and_doc_subcommands(tmp_path: Path):
 
 def test_cli_fmt_check_without_files_discovers_workspace_astra_files(tmp_path: Path):
     src = tmp_path / "a.astra"
-    src.write_text("fn main() Int{\nprint(1);\nreturn 0;\n}\n")
+    src.write_text("fn main()Int{\nprint(1);\nreturn 0;\n}")
     proc_bad = subprocess.run(
         [sys.executable, "-m", "astra.cli", "fmt", "--check"],
         cwd=tmp_path,

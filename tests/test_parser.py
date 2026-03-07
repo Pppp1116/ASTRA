@@ -223,7 +223,7 @@ fn main() Int{ return 0; }
     assert imp_mod.alias == "io"
     assert isinstance(imp_str, ImportDecl)
     assert imp_str.path == []
-    assert imp_str.source == "../shared/util.astra"
+    assert imp_str.source == "../shared/util.arixa"
 
 
 def test_parse_extern_and_async_await():

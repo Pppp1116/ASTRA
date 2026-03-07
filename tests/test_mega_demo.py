@@ -8,7 +8,7 @@ def run(cmd, cwd: Path):
 
 def test_mega_demo_py(tmp_path: Path):
     repo = Path(__file__).resolve().parents[1]
-    src = repo / "examples" / "mega_demo.astra"
+    src = repo / "examples" / "mega_demo.arixa"
 
     # write a config.json so it exercises JSON parsing
     (tmp_path / "config.json").write_text('{"seed": 7, "n": 5000, "mode": "mix", "out": "report_py.json"}')
@@ -24,7 +24,7 @@ def test_mega_demo_py(tmp_path: Path):
 
 def test_mega_demo_native(tmp_path: Path):
     repo = Path(__file__).resolve().parents[1]
-    src = repo / "examples" / "mega_demo.astra"
+    src = repo / "examples" / "mega_demo.arixa"
 
     (tmp_path / "config.json").write_text('{"seed": 7, "n": 5000, "mode": "mix", "out": "report_native.json"}')
 

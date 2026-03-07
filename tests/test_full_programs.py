@@ -211,7 +211,7 @@ fn main() Int{
     i += 1;
   }
   drop vec_set(v, 0, 10);
-  got: Option<Int> = vec_get(v, 5);
+  got: Int? = vec_get(v, 5);
   return vec_len(v) + (got ?? 0);
 }
 """,

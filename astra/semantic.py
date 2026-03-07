@@ -179,6 +179,10 @@ def _is_mut_ref_type(typ: Any) -> bool:
 
 def _canonical_type(typ: Any) -> str:
     t = type_text(typ)
+    # Handle nullable syntax T? 
+    if t.endswith("?"):
+        base = t[:-1].strip()
+        return _normalize_union([_canonical_type(base), "none"])
     if "|" in t:
         return _normalize_union(_split_top_level(t, "|"))
     if t == "Bytes":
@@ -432,7 +436,7 @@ BUILTIN_SIGS: dict[str, BuiltinSig] = {
     "vec_new": BuiltinSig([], "Any"),
     "vec_from": BuiltinSig(["Any"], "Any"),
     "vec_len": BuiltinSig(["Any"], "Int"),
-    "vec_get": BuiltinSig(["Any", "Int"], "Any"),
+    "vec_get": BuiltinSig(["Any", "Int"], "Any | none"),
     "vec_set": BuiltinSig(["Any", "Int", "Any"], "Int"),
     "vec_push": BuiltinSig(["Any", "Any"], "Int"),
 }
@@ -871,6 +875,20 @@ def _cast_supported(src: str, dst: str) -> bool:
     dst_c = _canonical_type(dst)
     if _same_type(src_c, dst_c):
         return True
+    # Support casting between equivalent nullable types
+    if _is_nullable_union(src_c) and _is_nullable_union(dst_c):
+        # Both are nullable, check if their non-nullable parts are compatible
+        src_inner = _remove_none_from_union(src_c)
+        dst_inner = _remove_none_from_union(dst_c)
+        return _cast_supported(src_inner, dst_inner)
+    # Support casting from nullable to non-nullable if inner types are compatible
+    if _is_nullable_union(src_c) and not _is_nullable_union(dst_c):
+        src_inner = _remove_none_from_union(src_c)
+        return _cast_supported(src_inner, dst_c)
+    # Support casting from non-nullable to nullable if inner types are compatible
+    if not _is_nullable_union(src_c) and _is_nullable_union(dst_c):
+        dst_inner = _remove_none_from_union(dst_c)
+        return _cast_supported(src_c, dst_inner)
     def _is_generic_symbol_name(t: str) -> bool:
         return bool(re.fullmatch(r"[A-Z][A-Za-z0-9_]*", t)) and t not in PRIMITIVES
     if _is_numeric_scalar_type(src_c) and _is_numeric_scalar_type(dst_c):

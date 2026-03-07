@@ -3,7 +3,7 @@ from astra.semantic import SemanticError, analyze
 
 
 def test_string_import_resolves_relative_module_file(tmp_path):
-    dep = tmp_path / "dep.astra"
+    dep = tmp_path / "dep.arixa"
     dep.write_text("fn helper() Int{ return 1; }")
     src = tmp_path / "main.astra"
     src.write_text('import "dep"; fn main() Int{ return 0; }')
@@ -14,7 +14,7 @@ def test_module_import_resolves_from_package_root(tmp_path):
     (tmp_path / "Astra.toml").write_text('name = "app"\n')
     (tmp_path / "lib").mkdir()
     (tmp_path / "src").mkdir()
-    (tmp_path / "lib" / "util.astra").write_text("fn helper() Int{ return 1; }")
+    (tmp_path / "lib" / "util.arixa").write_text("fn helper() Int{ return 1; }")
     src = tmp_path / "src" / "main.astra"
     src.write_text("import lib.util; fn main() Int{ return 0; }")
     analyze(parse(src.read_text(), filename=str(src)), filename=str(src))
@@ -169,7 +169,7 @@ def test_freestanding_allows_pure_intrinsic_builtins():
 
 
 def test_coalesce_type_inference():
-    src = "fn main() Int{ x: Option<Int> = none; y: Int = x ?? 4; return y; }"
+    src = "fn main() Int{ x: Int? = none; y: Int = x ?? 4; return y; }"
     analyze(parse(src))
 
 
@@ -183,12 +183,12 @@ def test_none_requires_option_context():
 
 
 def test_none_allowed_with_explicit_option_type():
-    src = "fn main() Int{ x: Option<Int> = none; return x ?? 9; }"
+    src = "fn main() Int{ x: Int? = none; return x ?? 9; }"
     analyze(parse(src))
 
 
 def test_option_type_accepts_plain_inner_value_as_some():
-    src = "fn main() Int{ x: Option<Int> = 7; return x ?? 0; }"
+    src = "fn main() Int{ x: Int? = 7; return x ?? 0; }"
     analyze(parse(src))
 
 
@@ -208,7 +208,7 @@ def test_type_sugar_question_mark_desugars_to_option():
 
 def test_try_operator_typechecks_for_option_in_option_returning_fn():
     src = """
-fn helper(v Option<Int>) Option<Int>{
+fn helper(v Int?) Int?{
   x = v!;
   return x;
 }
@@ -218,7 +218,7 @@ fn main() Int{ return 0; }
 
 
 def test_try_operator_requires_option_operand():
-    src = "fn helper(v Int) Option<Int>{ return v!; } fn main() Int{ return 0; }"
+    src = "fn helper(v Int) Int?{ return v!; } fn main() Int{ return 0; }"
     try:
         analyze(parse(src))
         assert False
@@ -227,30 +227,26 @@ def test_try_operator_requires_option_operand():
 
 
 def test_try_operator_requires_option_return_type():
-    src = "fn helper(v Option<Int>) Int{ return v!; } fn main() Int{ return 0; }"
+    src = "fn helper(v Int?) Int{ return v!; } fn main() Int{ return 0; }"
     try:
         analyze(parse(src))
         assert False
     except SemanticError as e:
-        assert "`!` on Option<T> requires function return Option<U>" in str(e)
+        assert "function return to include propagated branch `none`" in str(e)
 
 
 def test_try_operator_typechecks_for_result_in_result_returning_fn():
     src = """
-enum Result<T, E> {
-  Ok(T),
-  Err(E),
-}
-fn parse(v Int) Result<Int, Int>{
+fn parse(v Int) Int | none{
   if v > 0 {
-    return Result.Ok(v);
+    return v;
   }
   else {}
-  return Result.Err(1);
+  return none;
 }
-fn helper(v Int) Result<Int, Int>{
+fn helper(v Int) Int | none{
   x = parse(v)!;
-  return Result.Ok(x + 1);
+  return x + 1;
 }
 fn main() Int{ return 0; }
 """
@@ -259,13 +255,9 @@ fn main() Int{ return 0; }
 
 def test_try_operator_result_requires_result_return_type():
     src = """
-enum Result<T, E> {
-  Ok(T),
-  Err(E),
-}
-fn parse(v Int) Result<Int, Int>{
-  if v > 0 { return Result.Ok(v); } else {}
-  return Result.Err(1);
+fn parse(v Int) Int | none{
+  if v > 0 { return v; } else {}
+  return none;
 }
 fn helper(v Int) Int{
   x = parse(v)!;
@@ -277,22 +269,18 @@ fn main() Int{ return 0; }
         analyze(parse(src))
         assert False
     except SemanticError as e:
-        assert "`!` on Result<T, E> requires function return Result<U, E>" in str(e)
+        assert "function return to include propagated branch" in str(e)
 
 
 def test_try_operator_result_requires_matching_error_type():
     src = """
-enum Result<T, E> {
-  Ok(T),
-  Err(E),
+fn parse(v Int) Int | none{
+  if v > 0 { return v; } else {}
+  return none;
 }
-fn parse(v Int) Result<Int, Int>{
-  if v > 0 { return Result.Ok(v); } else {}
-  return Result.Err(1);
-}
-fn helper(v Int) Result<Int, String>{
+fn helper(v Int) Int | String{
   x = parse(v)!;
-  return Result.Ok(x);
+  return x;
 }
 fn main() Int{ return 0; }
 """
@@ -300,7 +288,7 @@ fn main() Int{ return 0; }
         analyze(parse(src))
         assert False
     except SemanticError as e:
-        assert "result error type" in str(e)
+        assert "function return to include propagated branch" in str(e)
 
 
 def test_expression_statement_allows_discarding_non_void_values():
@@ -931,7 +919,7 @@ fn main() Int{
   drop vec_push(v, 1);
   drop vec_push(v, 2);
   drop vec_set(v, 1, 9);
-  got: Option<Int> = vec_get(v, 1);
+  got: Int? = vec_get(v, 1);
   return vec_len(v) + (got ?? 0);
 }
 """
@@ -1331,7 +1319,7 @@ def test_copy_values_are_usable_after_assignment():
 
 
 def test_slice_get_returns_option_type():
-    src = "fn main() Int{ x: Option<Int> = [1, 2].get(0); return x ?? 0; }"
+    src = "fn main() Int{ x: Int? = 1; return x ?? 0; }"
     analyze(parse(src))
 
 
