@@ -9,11 +9,11 @@ from astra.check import diagnostics_to_json_list, format_diagnostic, run_check_p
 from astra.docgen import main as doc_main
 from astra.formatter import fmt, resolve_format_config
 from astra.pkg import main as pkg_main
-def _discover_astra_files(root: Path) -> list[Path]:
-    """Discover Astra source files under a root path, skipping tool/cache dirs."""
-    skip_dirs = {".git", ".venv", "__pycache__", ".pytest_cache", ".mypy_cache", "build", ".astra-build"}
+def _discover_arixa_files(root: Path) -> list[Path]:
+    """Discover Arixa source files under a root path, skipping tool/cache dirs."""
+    skip_dirs = {".git", ".venv", "__pycache__", ".pytest_cache", ".mypy_cache", "build", ".arixa-build"}
     out: list[Path] = []
-    for p in root.rglob("*.astra"):
+    for p in root.rglob("*.arixa"):
         if any(part in skip_dirs for part in p.parts):
             continue
         if p.is_file():
@@ -21,7 +21,7 @@ def _discover_astra_files(root: Path) -> list[Path]:
     out.sort(key=lambda x: x.as_posix())
     return out
 def cmd_build(a):
-    """Handle the `astra build` subcommand.
+    """Handle the `arixa build` subcommand.
     
     Parameters:
         a: Input value used by this routine.
@@ -45,7 +45,7 @@ def cmd_build(a):
     )
     print(state)
 def cmd_check(a):
-    """Handle the `astra check` subcommand.
+    """Handle the `arixa check` subcommand.
     
     Parameters:
         a: Input value used by this routine.
@@ -99,7 +99,7 @@ def cmd_check(a):
     if not result.ok:
         raise SystemExit(1)
 def cmd_run(a):
-    """Handle the `astra run` subcommand.
+    """Handle the `arixa run` subcommand.
     
     Parameters:
         a: Input value used by this routine.
@@ -107,11 +107,11 @@ def cmd_run(a):
     Returns:
         None. May raise `SystemExit` for CLI exit handling.
     """
-    out = Path(".astra-build") / (Path(a.input).stem + ".py")
+    out = Path(".arixa-build") / (Path(a.input).stem + ".py")
     build(a.input, str(out), "py")
     raise SystemExit(subprocess.call([sys.executable, str(out)] + a.args))
 def cmd_test(a):
-    """Handle the `astra test` subcommand.
+    """Handle the `arixa test` subcommand.
     
     Parameters:
         a: Input value used by this routine.
@@ -128,7 +128,7 @@ def cmd_test(a):
         args += ["-k", "e2e"]
     raise SystemExit(subprocess.call(args))
 def cmd_fmt(a):
-    """Handle the `astra fmt` subcommand.
+    """Handle the `arixa fmt` subcommand.
     
     Parameters:
         a: Input value used by this routine.
@@ -140,7 +140,7 @@ def cmd_fmt(a):
     if a.files:
         targets = [Path(path) for path in a.files]
     else:
-        targets = _discover_astra_files(Path.cwd())
+        targets = _discover_arixa_files(Path.cwd())
     bad: list[str] = []
     for fp in targets:
         src = fp.read_text()
@@ -159,7 +159,7 @@ def cmd_fmt(a):
         return
     print("formatted")
 def cmd_doc(a):
-    """Handle the `astra doc` subcommand.
+    """Handle the `arixa doc` subcommand.
     
     Parameters:
         a: Input value used by this routine.
@@ -170,9 +170,9 @@ def cmd_doc(a):
     args = [a.input, "-o", a.output]
     doc_main(args)
 def cmd_selfhost(a):
-    """Handle the `astra selfhost` subcommand.
+    """Handle the `arixa selfhost` subcommand.
     
-    The selfhost/compiler.astra file contains a staged compilation pipeline
+    The selfhost/compiler.arixa file contains a staged compilation pipeline
     (source analysis, IR construction, validation, code generation) that can
     be compiled via the Python backend.  However, the CLI entry-point reports
     the feature as unavailable until the full self-hosting contract (bootstrap
@@ -184,13 +184,13 @@ def cmd_selfhost(a):
         None. May raise `SystemExit` for CLI exit handling.
     """
     print(
-        "selfhost-unavailable: selfhost/compiler.astra contains a staged pipeline "
+        "selfhost-unavailable: selfhost/compiler.arixa contains a staged pipeline "
         "but the full self-hosting bootstrap is not yet finalized",
         file=sys.stderr,
     )
     raise SystemExit(1)
 def cmd_pkg(a):
-    """Handle the `astra pkg` subcommand.
+    """Handle the `arixa pkg` subcommand.
     
     Parameters:
         a: Input value used by this routine.

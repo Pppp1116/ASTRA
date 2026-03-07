@@ -33,7 +33,7 @@ def compile_and_run_program(
     This helper is intended for golden tests that assert consistent behavior
     across the Python and LLVM/native backends.
     """
-    src = tmp_path / f"{name}.astra"
+    src = tmp_path / f"{name}.arixa"
     src.write_text(src_text)
 
     results: list[RunResult] = []

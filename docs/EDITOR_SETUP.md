@@ -1,6 +1,6 @@
 # Formatting and Editor Setup
 
-Astra defaults are chosen for readability and consistency across CLI, docs, and editor tooling.
+Arixa defaults are chosen for readability and consistency across CLI, docs, and editor tooling.
 
 ## Formatter defaults
 
@@ -9,7 +9,7 @@ Astra defaults are chosen for readability and consistency across CLI, docs, and 
 - Top-level spacing: one blank line between declarations
 - Line-width preference: 100 columns
 
-You can configure indentation via either `astfmt.toml` or `Astra.toml`:
+You can configure indentation via either `arfmt.toml` or `Arixa.toml`:
 
 ```toml
 indent_width = 4
@@ -21,7 +21,7 @@ You can also set `line_width` (default `100`) in the same files.
 
 ## Recommended coding fonts
 
-Astra does not force a global font, but these are recommended:
+Arixa does not force a global font, but these are recommended:
 
 - Atkinson Hyperlegible Mono (recommended)
 - JetBrains Mono
@@ -29,12 +29,12 @@ Astra does not force a global font, but these are recommended:
 
 ## VS Code setup
 
-The Astra VS Code extension already provides Astra-scoped defaults.
+The Arixa VS Code extension already provides Arixa-scoped defaults.
 
 If you want to set them manually, add this to `settings.json`:
 
 ```json
-"[astra]": {
+"[arixa]": {
   "editor.tabSize": 4,
   "editor.insertSpaces": true,
   "editor.detectIndentation": false,

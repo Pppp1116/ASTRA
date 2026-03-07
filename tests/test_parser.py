@@ -211,7 +211,7 @@ fn main() Int{ return 0; }
 def test_import_supports_dotted_module_and_string_forms():
     src = """
 import std.io as io;
-import "../shared/util.astra";
+import "../shared/util.arixa";
 fn main() Int{ return 0; }
 """
     prog = parse(src)
@@ -409,11 +409,11 @@ def test_parse_deep_nesting_reports_parse_error_with_span():
     nested = "(" * 120 + "1" + ")" * 119
     bad = f"fn main() Int{{ x = {nested}; return 0; }}"
     try:
-        parse(bad, filename="deep.astra")
+        parse(bad, filename="deep.arixa")
         assert False, "expected ParseError"
     except ParseError as e:
         line = str(e).splitlines()[0]
-        assert line.startswith("PARSE deep.astra:1:")
+        assert line.startswith("PARSE deep.arixa:1:")
 
 
 def test_nil_keyword_is_rejected():

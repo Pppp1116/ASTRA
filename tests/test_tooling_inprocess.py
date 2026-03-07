@@ -14,7 +14,7 @@ import astra.runtime
 
 
 def test_docgen_main_writes_output(tmp_path: Path):
-    src = tmp_path / "a.astra"
+    src = tmp_path / "a.arixa"
     out = tmp_path / "api.md"
     src.write_text("/// docs\nfn main() Int{ return 0; }\n")
     astra.docgen.main([str(src), "-o", str(out)])
@@ -25,7 +25,7 @@ def test_docgen_main_writes_output(tmp_path: Path):
 
 
 def test_linter_main_json_output(tmp_path: Path, capsys):
-    src = tmp_path / "bad.astra"
+    src = tmp_path / "bad.arixa"
     src.write_text("fn main() Int{\treturn 0;\n}\n")
     try:
         astra.linter.main([str(src), "--json", "--no-semantic"])
@@ -37,7 +37,7 @@ def test_linter_main_json_output(tmp_path: Path, capsys):
 
 
 def test_linter_main_accepts_directory(tmp_path: Path, capsys):
-    src = tmp_path / "bad.astra"
+    src = tmp_path / "bad.arixa"
     src.write_text("fn main() Int{\treturn 0;\n}\n")
     try:
         astra.linter.main([str(tmp_path), "--json", "--no-semantic"])
@@ -79,7 +79,7 @@ def test_cli_pkg_dispatch_roundtrip(tmp_path: Path):
 
 
 def test_cli_main_check_and_build(tmp_path: Path):
-    src = tmp_path / "a.astra"
+    src = tmp_path / "a.arixa"
     out = tmp_path / "a.py"
     src.write_text("fn main() Int{ return 0; }")
     astra.cli.main(["check", str(src)])

@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "astra-lang"
+name = "arixa-lang"
 version = "0.2.0"
 description = "Self-hosted-inspired toy programming language ecosystem"
 requires-python = ">=3.11"
@@ -20,21 +20,21 @@ dev = [
 ]
 
 [project.scripts]
-astra = "astra.cli:main"
-astpm = "astra.pkg:main"
-astfmt = "astra.formatter:main"
-astlint = "astra.linter:main"
-astdoc = "astra.docgen:main"
-astlsp = "astra.lsp:main"
-astdbg = "astra.debugger:main"
-astprof = "astra.profiler:main"
+arixa = "astra.cli:main"
+arpm = "astra.pkg:main"
+arfmt = "astra.formatter:main"
+arlint = "astra.linter:main"
+ardoc = "astra.docgen:main"
+arlsp = "astra.lsp:main"
+ardbg = "astra.debugger:main"
+arprof = "astra.profiler:main"
 
 [tool.setuptools.packages.find]
 include = ["astra*"]
 exclude = ["tests*", "docs*", "benchmarks*", "stdlib*", "runtime*", "selfhost*"]
 
 [tool.setuptools.package-data]
-astra = ["stdlib/*.astra", "stdlib/bindings/*.astra", "assets/runtime/llvm_runtime.c"]
+astra = ["stdlib/*.arixa", "stdlib/bindings/*.arixa", "assets/runtime/llvm_runtime.c"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

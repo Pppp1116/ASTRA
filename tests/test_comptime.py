@@ -14,7 +14,7 @@ def test_parse_comptime_block():
 
 
 def test_comptime_evaluates_function_calls_and_loops(tmp_path: Path):
-    src = tmp_path / "c.astra"
+    src = tmp_path / "c.arixa"
     out = tmp_path / "c.py"
     src.write_text(
         """
@@ -60,7 +60,7 @@ fn main() Int{
 
 
 def test_comptime_no_io_allowed(tmp_path: Path):
-    src = tmp_path / "bad.astra"
+    src = tmp_path / "bad.arixa"
     out = tmp_path / "bad.py"
     src.write_text(
         """
@@ -80,7 +80,7 @@ fn main() Int{
 
 
 def test_comptime_match_is_evaluated(tmp_path: Path):
-    src = tmp_path / "match.astra"
+    src = tmp_path / "match.arixa"
     out = tmp_path / "match.py"
     src.write_text(
         """
@@ -103,7 +103,7 @@ fn main() Int{
 
 
 def test_comptime_supports_indirect_function_calls(tmp_path: Path):
-    src = tmp_path / "indirect.astra"
+    src = tmp_path / "indirect.arixa"
     out = tmp_path / "indirect.py"
     src.write_text(
         """
@@ -125,7 +125,7 @@ fn main() Int{
 
 
 def test_comptime_skips_non_escaping_runtime_materialization(tmp_path: Path):
-    src = tmp_path / "skip_tmp.astra"
+    src = tmp_path / "skip_tmp.arixa"
     out = tmp_path / "skip_tmp.py"
     src.write_text(
         """
@@ -143,7 +143,7 @@ fn main() Int{
 
 
 def test_comptime_try_operator_reports_current_syntax(tmp_path: Path):
-    src = tmp_path / "try_not_supported.astra"
+    src = tmp_path / "try_not_supported.arixa"
     out = tmp_path / "try_not_supported.py"
     src.write_text(
         """
@@ -166,7 +166,7 @@ fn main() Int{
 
 
 def test_comptime_bans_time_builtins_for_determinism(tmp_path: Path):
-    src = tmp_path / "time_banned.astra"
+    src = tmp_path / "time_banned.arixa"
     out = tmp_path / "time_banned.py"
     src.write_text(
         """

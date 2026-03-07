@@ -1,4 +1,0 @@
-fn main() Int{
-    print("hello, astra");
-    return 0;
-}

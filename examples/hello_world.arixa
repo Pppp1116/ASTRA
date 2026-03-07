@@ -1,0 +1,4 @@
+fn main() Int {
+    print("hello, arixa");
+    return 0;
+}

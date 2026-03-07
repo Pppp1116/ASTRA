@@ -1,54 +1,54 @@
-ASTRA_VENV ?= .venv
-ASTRA_BIN := $(ASTRA_VENV)/bin
-ASTRA := $(ASTRA_BIN)/astra
-ASTLINT := $(ASTRA_BIN)/astlint
-PYTEST := $(ASTRA_BIN)/pytest
+ARIXA_VENV ?= .venv
+ARIXA_BIN := $(ARIXA_VENV)/bin
+ARIXA := $(ARIXA_BIN)/arixa
+ARLINT := $(ARIXA_BIN)/arlint
+PYTEST := $(ARIXA_BIN)/pytest
 
-ASTRA_SOURCES := $(shell find . -name '*.astra' -print)
+ARIXA_SOURCES := $(shell find . -name '*.arixa' -print)
 
 .PHONY: help venv bootstrap fmt fmt-check lint test e2e bundle-vscode bundle-toolchain all
 
 help:
 	@echo "Available targets:"
-	@echo "  venv       - create virtualenv and install astra in dev mode"
-	@echo "  fmt        - format all .astra sources in-place"
-	@echo "  fmt-check  - check formatting of all .astra sources"
-	@echo "  lint       - run astra linter on all .astra sources"
-	@echo "  test       - run astra CLI tests and full pytest suite (auto-bootstraps .venv)"
-	@echo "  e2e        - run e2e tests via 'astra test --kind e2e' (if configured)"
+	@echo "  venv       - create virtualenv and install arixa in dev mode"
+	@echo "  fmt        - format all .arixa sources in-place"
+	@echo "  fmt-check  - check formatting of all .arixa sources"
+	@echo "  lint       - run arixa linter on all .arixa sources"
+	@echo "  test       - run arixa CLI tests and full pytest suite (auto-bootstraps .venv)"
+	@echo "  e2e        - run e2e tests via 'arixa test --kind e2e' (if configured)"
 	@echo "  bundle-vscode   - refresh bundled compiler snapshot used by VS Code extension"
 	@echo "  bundle-toolchain - build portable compiler bundle into dist/toolchain/"
 	@echo "  all        - fmt-check, lint, and test"
 
 venv:
-	python -m venv $(ASTRA_VENV)
-	$(ASTRA_BIN)/python -m pip install -e ".[dev]"
+	python -m venv $(ARIXA_VENV)
+	$(ARIXA_BIN)/python -m pip install -e ".[dev]"
 
 bootstrap:
-	@if [ ! -x "$(ASTRA)" ] || [ ! -x "$(PYTEST)" ]; then \
-	  echo "Bootstrapping $(ASTRA_VENV) with project dev dependencies..."; \
-	  python -m venv $(ASTRA_VENV); \
-	  $(ASTRA_BIN)/python -m pip install -e ".[dev]"; \
+	@if [ ! -x "$(ARIXA)" ] || [ ! -x "$(PYTEST)" ]; then \
+	  echo "Bootstrapping $(ARIXA_VENV) with project dev dependencies..."; \
+	  python -m venv $(ARIXA_VENV); \
+	  $(ARIXA_BIN)/python -m pip install -e ".[dev]"; \
 	fi
 
 fmt: bootstrap
-	$(ASTRA) fmt $(ASTRA_SOURCES)
+	$(ARIXA) fmt $(ARIXA_SOURCES)
 
 fmt-check: bootstrap
-	$(ASTRA) fmt --check $(ASTRA_SOURCES)
+	$(ARIXA) fmt --check $(ARIXA_SOURCES)
 
 lint: bootstrap
-	@for f in $(ASTRA_SOURCES); do \
+	@for f in $(ARIXA_SOURCES); do \
 	  echo "lint $$f"; \
-	  $(ASTLINT) $$f || exit $$?; \
+	  $(ARLINT) $$f || exit $$?; \
 	done
 
 test: bootstrap
-	$(ASTRA) test
+	$(ARIXA) test
 	$(PYTEST)
 
 e2e: bootstrap
-	$(ASTRA) test --kind e2e
+	$(ARIXA) test --kind e2e
 
 bundle-vscode:
 	python scripts/build_vscode_bundle.py

@@ -6,7 +6,7 @@ from astra.build import build
 
 
 def _build_and_run(tmp_path: Path, name: str, src_text: str) -> subprocess.CompletedProcess[str]:
-    src = tmp_path / f"{name}.astra"
+    src = tmp_path / f"{name}.arixa"
     out = tmp_path / f"{name}.py"
     src.write_text(src_text)
     state = build(str(src), str(out), "py")

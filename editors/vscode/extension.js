@@ -31,8 +31,8 @@ if ! command -v "$PY" >/dev/null 2>&1; then
   PY="python"
 fi
 export PYTHONPATH="$ROOT"
-export ASTRA_STDLIB_PATH="$ROOT/astra/stdlib"
-export ASTRA_RUNTIME_C_PATH="$ROOT/astra/assets/runtime/llvm_runtime.c"
+export ARIXA_STDLIB_PATH="$ROOT/astra/stdlib"
+export ARIXA_RUNTIME_C_PATH="$ROOT/astra/assets/runtime/llvm_runtime.c"
 exec "$PY" -m $MODULE "$@"
 `;
 
@@ -45,8 +45,8 @@ if defined ASTRA_PYTHON (
   set "PY=python"
 )
 set "PYTHONPATH=%ROOT%"
-set "ASTRA_STDLIB_PATH=%ROOT%\\astra\\stdlib"
-set "ASTRA_RUNTIME_C_PATH=%ROOT%\\astra\\assets\\runtime\\llvm_runtime.c"
+set "ARIXA_STDLIB_PATH=%ROOT%\\astra\\stdlib"
+set "ARIXA_RUNTIME_C_PATH=%ROOT%\\astra\\assets\\runtime\\llvm_runtime.c"
 "%PY%" -m ${moduleName} %*
 `;
 }

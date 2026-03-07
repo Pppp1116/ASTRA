@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
-  "name": "Astra",
-  "scopeName": "source.astra",
+  "name": "Arixa",
+  "scopeName": "source.arixa",
   "patterns": [
     { "include": "#comments" },
     { "include": "#strings" },
@@ -14,9 +14,9 @@
   "repository": {
     "comments": {
       "patterns": [
-        { "name": "comment.line.double-slash.astra", "match": "//.*$" },
+        { "name": "comment.line.double-slash.arixa", "match": "//.*$" },
         {
-          "name": "comment.block.astra",
+          "name": "comment.block.arixa",
           "begin": "/\\*",
           "end": "\\*/"
         }
@@ -25,11 +25,11 @@
     "strings": {
       "patterns": [
         {
-          "name": "string.quoted.double.astra",
+          "name": "string.quoted.double.arixa",
           "begin": "\"",
           "end": "\"",
           "patterns": [
-            { "name": "constant.character.escape.astra", "match": "\\\\." }
+            { "name": "constant.character.escape.arixa", "match": "\\\\." }
           ]
         }
       ]

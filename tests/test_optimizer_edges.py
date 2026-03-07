@@ -7,7 +7,7 @@ from astra.build import build
 
 
 def test_dead_pure_lets_are_removed(tmp_path: Path):
-    src = tmp_path / "dead_lets.astra"
+    src = tmp_path / "dead_lets.arixa"
     out = tmp_path / "dead_lets.py"
     src.write_text(
         """
@@ -25,7 +25,7 @@ fn main() Int{
 
 
 def test_dead_let_with_side_effect_is_preserved_as_expr(tmp_path: Path):
-    src = tmp_path / "dead_side.astra"
+    src = tmp_path / "dead_side.arixa"
     out = tmp_path / "dead_side.py"
     src.write_text(
         """
@@ -44,7 +44,7 @@ fn main() Int{
 
 
 def test_dead_trapping_expr_statement_is_not_removed(tmp_path: Path):
-    src = tmp_path / "trap_expr.astra"
+    src = tmp_path / "trap_expr.arixa"
     out = tmp_path / "trap_expr.py"
     src.write_text(
         """
@@ -61,7 +61,7 @@ fn main() Int{
 
 
 def test_dead_trapping_let_initializer_is_not_removed(tmp_path: Path):
-    src = tmp_path / "trap_let.astra"
+    src = tmp_path / "trap_let.arixa"
     out = tmp_path / "trap_let.py"
     src.write_text(
         """
@@ -78,7 +78,7 @@ fn main() Int{
 
 
 def test_mul_zero_does_not_drop_trapping_subexpression(tmp_path: Path):
-    src = tmp_path / "mul_zero_trap.astra"
+    src = tmp_path / "mul_zero_trap.arixa"
     out = tmp_path / "mul_zero_trap.py"
     src.write_text(
         """
@@ -94,7 +94,7 @@ fn main() Int{
 
 
 def test_short_circuit_false_and_still_short_circuits(tmp_path: Path):
-    src = tmp_path / "short_and.astra"
+    src = tmp_path / "short_and.arixa"
     out = tmp_path / "short_and.py"
     src.write_text(
         """
@@ -111,7 +111,7 @@ fn main() Int{
 
 
 def test_optimizer_fixed_point_propagates_constant_chain(tmp_path: Path):
-    src = tmp_path / "chain.astra"
+    src = tmp_path / "chain.arixa"
     out = tmp_path / "chain.py"
     src.write_text(
         """

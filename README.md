@@ -1,13 +1,13 @@
-# Astra
+# Arixa
 
-Astra is a compact programming language ecosystem with a full compiler pipeline, CLI tooling, language server support, and a batteries-included standard library.
+Arixa is a compact programming language ecosystem with a full compiler pipeline, CLI tooling, language server support, and a batteries-included standard library.
 
 ## Main Features
 
 - Deterministic builds with content-based caching.
 - Multiple build targets: Python, LLVM IR, and native executables via `clang`.
 - Static checking pipeline with parse, compile-time, and semantic diagnostics.
-- Built-in tooling: formatter (`astfmt`), linter (`astlint`), doc generator (`astdoc`), package helper (`astpm`), LSP server (`astlsp`), debugger (`astdbg`), and profiler (`astprof`).
+- Built-in tooling: formatter (`arfmt`), linter (`arlint`), doc generator (`ardoc`), package helper (`arpm`), LSP server (`arlsp`), debugger (`ardbg`), and profiler (`arprof`).
 - Hosted and freestanding compilation modes.
 - First-class GPU compute subsystem with `gpu fn`, explicit device buffers, and `gpu.launch`.
 - Standard library modules for core types, collections, I/O, networking, process control, serialization, crypto, and time.
@@ -29,11 +29,11 @@ Requirements:
 
 ## Quick Example
 
-`examples/hello_world.astra`:
+`examples/hello_world.arixa`:
 
-```astra
+```arixa
 fn main() Int{
-    print("hello, astra");
+    print("hello, arixa");
     return 0;
 }
 ```
@@ -41,8 +41,8 @@ fn main() Int{
 Build and run:
 
 ```bash
-astra check examples/hello_world.astra
-astra build examples/hello_world.astra -o build/hello.py
+arixa check examples/hello_world.arixa
+arixa build examples/hello_world.arixa -o build/hello.py
 python build/hello.py
 ```
 

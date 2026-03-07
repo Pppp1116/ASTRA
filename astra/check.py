@@ -743,7 +743,7 @@ def _suggestions_for(
         out.append(DiagSuggestion(message="add a `return` statement on every control-flow path"))
 
     if "cannot resolve import" in m:
-        out.append(DiagSuggestion(message="verify the import path and that the referenced `.astra` file exists"))
+        out.append(DiagSuggestion(message="verify the import path and that the referenced `.arixa` file exists"))
 
     if "non-exhaustive match for bool" in m:
         out.append(DiagSuggestion(message="add the missing `false`/`true` arm, or add a trailing wildcard `_ => { ... }` arm"))

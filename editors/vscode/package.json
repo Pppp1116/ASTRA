@@ -1,10 +1,10 @@
 {
-  "name": "astra-language",
-  "displayName": "Astra Language",
-  "description": "VS Code support for Astra via the astlsp language server.",
+  "name": "arixa-language",
+  "displayName": "Arixa Language",
+  "description": "VS Code support for Arixa via the arlsp language server.",
   "version": "0.4.3",
-  "icon": "images/astra.png",
-  "publisher": "astra-lang",
+  "icon": "images/arixa.png",
+  "publisher": "arixa-lang",
   "engines": {
     "vscode": "^1.88.0"
   },
@@ -12,7 +12,7 @@
     "Programming Languages"
   ],
   "keywords": [
-    "astra",
+    "arixa",
     "language",
     "lsp"
   ],
@@ -32,87 +32,87 @@
   "contributes": {
     "languages": [
       {
-        "id": "astra",
+        "id": "arixa",
         "aliases": [
-          "Astra",
-          "astra"
+          "Arixa",
+          "arixa"
         ],
         "extensions": [
-          ".astra"
+          ".arixa"
         ],
         "icon": {
-          "light": "images/astra.png",
-          "dark": "images/astra.png"
+          "light": "images/arixa.png",
+          "dark": "images/arixa.png"
         },
         "configuration": "./language-configuration.json"
       }
     ],
     "grammars": [
       {
-        "language": "astra",
-        "scopeName": "source.astra",
-        "path": "./syntaxes/astra.tmLanguage.json"
+        "language": "arixa",
+        "scopeName": "source.arixa",
+        "path": "./syntaxes/arixa.tmLanguage.json"
       }
     ],
     "snippets": [
       {
-        "language": "astra",
-        "path": "./snippets/astra.code-snippets"
+        "language": "arixa",
+        "path": "./snippets/arixa.code-snippets"
       }
     ],
     "commands": [
       {
-        "command": "astra.restartLanguageServer",
-        "title": "Astra: Restart Language Server"
+        "command": "arixa.restartLanguageServer",
+        "title": "Arixa: Restart Language Server"
       },
       {
-        "command": "astra.showLanguageServerStatus",
-        "title": "Astra: Show Language Server Status"
+        "command": "arixa.showLanguageServerStatus",
+        "title": "Arixa: Show Language Server Status"
       },
       {
-        "command": "astra.openExtensionLog",
-        "title": "Astra: Open Extension Log"
+        "command": "arixa.openExtensionLog",
+        "title": "Arixa: Open Extension Log"
       },
       {
-        "command": "astra.buildCurrentFile",
-        "title": "Astra: Build Current File"
+        "command": "arixa.buildCurrentFile",
+        "title": "Arixa: Build Current File"
       },
       {
-        "command": "astra.checkForToolchainUpdates",
-        "title": "Astra: Check Toolchain Updates"
+        "command": "arixa.checkForToolchainUpdates",
+        "title": "Arixa: Check Toolchain Updates"
       }
     ],
     "configuration": {
-      "title": "Astra",
+      "title": "Arixa",
       "properties": {
-        "astra.languageServer.mode": {
+        "arixa.languageServer.mode": {
           "type": "string",
           "enum": [
             "bundled",
             "external"
           ],
           "default": "bundled",
-          "description": "How to start the language server. Bundled mode auto-provisions a private toolchain in VS Code storage, then tries workspace dist/toolchain/bin/astlsp, then falls back to the server shipped inside this extension."
+          "description": "How to start the language server. Bundled mode auto-provisions a private toolchain in VS Code storage, then tries workspace dist/toolchain/bin/arlsp, then falls back to the server shipped inside this extension."
         },
-        "astra.languageServer.command": {
+        "arixa.languageServer.command": {
           "type": "string",
           "default": "",
-          "description": "Executable used to launch the Astra language server in external mode."
+          "description": "Executable used to launch the Arixa language server in external mode."
         },
-        "astra.languageServer.pythonPath": {
+        "arixa.languageServer.pythonPath": {
           "type": "string",
           "default": "",
           "description": "Python executable used for bundled server mode (optional override)."
         },
-        "astra.languageServer.args": {
+        "arixa.languageServer.args": {
           "type": "array",
           "items": {
             "type": "string"
           },
           "default": [],
-          "description": "Additional command line arguments passed to the external Astra language server."
+          "description": "Additional command line arguments passed to the external Arixa language server."
         },
-        "astra.trace.server": {
+        "arixa.trace.server": {
           "type": "string",
           "enum": [
             "off",
@@ -122,26 +122,26 @@
           "default": "off",
           "description": "Trace level for language server protocol logs."
         },
-        "astra.compiler.mode": {
+        "arixa.compiler.mode": {
           "type": "string",
           "enum": [
             "bundled",
             "external"
           ],
           "default": "bundled",
-          "description": "How to run compiler commands from VS Code. Bundled mode auto-provisions a private toolchain in VS Code storage, then tries workspace dist/toolchain/bin/astra, then falls back to the compiler copy shipped in this extension."
+          "description": "How to run compiler commands from VS Code. Bundled mode auto-provisions a private toolchain in VS Code storage, then tries workspace dist/toolchain/bin/arixa, then falls back to the compiler copy shipped in this extension."
         },
-        "astra.compiler.command": {
+        "arixa.compiler.command": {
           "type": "string",
           "default": "",
-          "description": "Executable used to launch the Astra compiler in external mode."
+          "description": "Executable used to launch the Arixa compiler in external mode."
         },
-        "astra.compiler.pythonPath": {
+        "arixa.compiler.pythonPath": {
           "type": "string",
           "default": "",
           "description": "Python executable used for bundled compiler mode (optional override)."
         },
-        "astra.compiler.args": {
+        "arixa.compiler.args": {
           "type": "array",
           "items": {
             "type": "string"
@@ -149,7 +149,7 @@
           "default": [],
           "description": "Additional command line arguments passed before compiler subcommands in external mode."
         },
-        "astra.compiler.target": {
+        "arixa.compiler.target": {
           "type": "string",
           "enum": [
             "py",
@@ -157,33 +157,33 @@
             "native"
           ],
           "default": "native",
-          "description": "Default target for `Astra: Build Current File`."
+          "description": "Default target for `Arixa: Build Current File`."
         },
-        "astra.compiler.outputDir": {
+        "arixa.compiler.outputDir": {
           "type": "string",
-          "default": ".astra-build",
-          "description": "Output directory for `Astra: Build Current File` (absolute or workspace-relative)."
+          "default": ".arixa-build",
+          "description": "Output directory for `Arixa: Build Current File` (absolute or workspace-relative)."
         },
-        "astra.compiler.buildArgs": {
+        "arixa.compiler.buildArgs": {
           "type": "array",
           "items": {
             "type": "string"
           },
           "default": [],
-          "description": "Extra CLI arguments appended to `astra build`."
+          "description": "Extra CLI arguments appended to `arixa build`."
         },
-        "astra.toolchain.autoUpdateCheck": {
+        "arixa.toolchain.autoUpdateCheck": {
           "type": "boolean",
           "default": true,
-          "description": "Periodically check online for newer Astra toolchain versions."
+          "description": "Periodically check online for newer Arixa toolchain versions."
         },
-        "astra.toolchain.checkIntervalHours": {
+        "arixa.toolchain.checkIntervalHours": {
           "type": "number",
           "default": 24,
           "minimum": 1,
           "description": "How often to check for toolchain updates (hours)."
         },
-        "astra.toolchain.updateChannel": {
+        "arixa.toolchain.updateChannel": {
           "type": "string",
           "enum": [
             "stable",
@@ -192,7 +192,7 @@
           "default": "stable",
           "description": "Update channel for online toolchain checks."
         },
-        "astra.toolchain.updateManifestUrl": {
+        "arixa.toolchain.updateManifestUrl": {
           "type": "string",
           "default": "https://raw.githubusercontent.com/Pppp1116/ASTRA/main/registry/toolchain-updates.json",
           "description": "Manifest URL used by the online toolchain update checker."
@@ -200,7 +200,7 @@
       }
     },
     "configurationDefaults": {
-      "[astra]": {
+      "[arixa]": {
         "editor.tabSize": 4,
         "editor.insertSpaces": true,
         "editor.detectIndentation": false,

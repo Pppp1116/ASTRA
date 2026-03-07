@@ -1,0 +1,5 @@
+{
+  "/home/pedro/rust-projects/language/ASTRA/examples/hello_world.arixa::py::exe::0::0::0::debug::trap::::::": "b0d9bb84d1551a1833dfd7215883fb9f1433fa8175dbc525e5e599d1d074aa4f",
+  "/tmp/pytest-of-pedro/pytest-0/test_build_py0/a.astra::py::exe::0::0::0::debug::trap::::::": "d90c4dc43afca776a9e1ed71db1889ee0d9a6ee52f0e09bd64cfbd30955bfcad",
+  "/tmp/pytest-of-pedro/pytest-1/test_comptime_evaluates_functi0/c.arixa::py::exe::0::0::0::debug::trap::::::": "de574dd477b7092fe7b1a526d04e150baa47ac31eb6cc965b5ab4812a743de53"
+}
