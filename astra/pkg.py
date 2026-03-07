@@ -1,5 +1,4 @@
 """Package-manager helpers for Astra.toml dependency workflows."""
-
 from __future__ import annotations
 
 import argparse
@@ -17,7 +16,6 @@ try:
     import tomllib
 except Exception:  # pragma: no cover - fallback for older runtimes
     import tomli as tomllib
-
 
 REG = Path("Astra.lock")
 MANIFEST = Path("Astra.toml")
@@ -57,7 +55,6 @@ def _load_manifest() -> dict:
     if not MANIFEST.exists():
         return {"name": "app", "deps": {}, "project_style": False}
     data = tomllib.loads(MANIFEST.read_text())
-
     if "project" in data and isinstance(data["project"], dict):
         name = data["project"].get("name", "app")
         deps = data.get("dependencies", {})
@@ -70,7 +67,6 @@ def _load_manifest() -> dict:
             if isinstance(k, str) and isinstance(v, str):
                 out[k] = v
         return {"name": name, "deps": out, "project_style": True}
-
     name = data.get("name", "app")
     deps = data.get("deps", {})
     if not isinstance(name, str):
@@ -189,6 +185,7 @@ def _matches_semver_constraint(version: str, constraint: str) -> bool:
     c = constraint.strip()
     if not c or c == "*":
         return True
+
     pv = _parse_semver(version)
     if pv is None:
         return version == c
@@ -243,6 +240,7 @@ def _matches_semver_constraint(version: str, constraint: str) -> bool:
     exact = _parse_semver(c)
     if exact is not None:
         return pv == exact
+
     return version == c
 
 
@@ -260,6 +258,7 @@ def _registry_versions(entry: dict[str, Any]) -> dict[str, dict[str, Any]]:
             ver = item.get("version")
             if isinstance(ver, str):
                 out[ver] = dict(item)
+
     fallback_ver = entry.get("version")
     if isinstance(fallback_ver, str) and fallback_ver.strip():
         meta = {"repo": entry.get("repo", ""), "checksum": entry.get("checksum", "")}
@@ -271,12 +270,15 @@ def _resolve_from_registry(pkg: str, constraint: str, registry: dict[str, dict])
     entry = registry.get(pkg)
     if not isinstance(entry, dict):
         raise ValueError(_diag(f"package `{pkg}` not found in registry; try `astpm search {pkg}`"))
+
     versions = _registry_versions(entry)
     if not versions:
         raise ValueError(_diag(f"package `{pkg}` has no versions configured in registry"))
+
     candidates = [v for v in versions.keys() if _matches_semver_constraint(v, constraint)]
     if not candidates:
         raise ValueError(_diag(f"no version of `{pkg}` satisfies `{constraint}`"))
+
     version = sorted(candidates, key=_semver_sort_key, reverse=True)[0]
     meta = versions[version]
     repo = str(meta.get("repo", entry.get("repo", ""))).strip()
@@ -290,16 +292,37 @@ def _resolve_from_registry_many(pkg: str, constraints: list[str], registry: dict
     entry = registry.get(pkg)
     if not isinstance(entry, dict):
         raise ValueError(_diag(f"package `{pkg}` not found in registry; try `astpm search {pkg}`"))
+
     versions = _registry_versions(entry)
     if not versions:
         raise ValueError(_diag(f"package `{pkg}` has no versions configured in registry"))
+
     filtered: list[str] = []
     for ver in versions.keys():
         if all(_matches_semver_constraint(ver, c) for c in constraints):
             filtered.append(ver)
+
     if not filtered:
         joined = " & ".join(constraints) if constraints else "*"
-        raise ValueError(_diag(f"no version of `{pkg}` satisfies `{joined}`"))
+        available = sorted(versions.keys(), key=_semver_sort_key, reverse=True)[:5]
+        avail_str = ", ".join(available) if available else "(none)"
+        detail_parts = []
+        for c in constraints:
+            matching = [v for v in versions.keys() if _matches_semver_constraint(v, c)]
+            if matching:
+                detail_parts.append(f"  constraint `{c}` matches: {', '.join(sorted(matching, key=_semver_sort_key, reverse=True)[:3])}")
+            else:
+                detail_parts.append(f"  constraint `{c}` matches no available versions")
+        detail = "\n".join(detail_parts)
+        raise ValueError(
+            _diag(
+                f"no version of `{pkg}` satisfies all constraints `{joined}`\n"
+                f"  available versions: {avail_str}\n"
+                f"  per-constraint breakdown:\n{detail}\n"
+                f"  hint: relax one of the conflicting constraints or pin a compatible version"
+            )
+        )
+
     version = sorted(filtered, key=_semver_sort_key, reverse=True)[0]
     meta = versions[version]
     repo = str(meta.get("repo", entry.get("repo", ""))).strip()
@@ -375,6 +398,7 @@ def _ensure_package_installed(name: str, version: str, repo: str) -> Path:
     dst = _package_home() / name / version
     if dst.exists():
         return dst
+
     dst.parent.mkdir(parents=True, exist_ok=True)
 
     # Local path support for tests/private setups.
@@ -382,6 +406,7 @@ def _ensure_package_installed(name: str, version: str, repo: str) -> Path:
         src = Path(repo[len("file://") :]).resolve()
         shutil.copytree(src, dst)
         return dst
+
     maybe_path = Path(repo)
     if maybe_path.exists():
         shutil.copytree(maybe_path.resolve(), dst)
@@ -390,6 +415,7 @@ def _ensure_package_installed(name: str, version: str, repo: str) -> Path:
     git = shutil.which("git")
     if git is None:
         raise ValueError(_diag("git is required to install packages from repositories"))
+
     cp = subprocess.run([git, "clone", "--depth", "1", repo, str(dst)], capture_output=True, text=True)
     if cp.returncode != 0:
         detail = (cp.stderr or cp.stdout).strip()
@@ -411,16 +437,19 @@ def _package_manifest_deps(data: dict) -> dict[str, str]:
     out: dict[str, str] = {}
     if not isinstance(data, dict):
         return out
+
     deps = data.get("dependencies")
     if isinstance(deps, dict):
         for k, v in deps.items():
             if isinstance(k, str) and isinstance(v, str):
                 out[k] = v.strip()
+
     deps_legacy = data.get("deps")
     if isinstance(deps_legacy, dict):
         for k, v in deps_legacy.items():
             if isinstance(k, str) and isinstance(v, str):
                 out[k] = v.strip()
+
     return out
 
 
@@ -449,9 +478,11 @@ def _maybe_run_install_hint(pkg_name: str, pkg_manifest: dict) -> None:
         native = {}
     if not isinstance(install, dict):
         install = {}
+
     libs = native.get("libs", [])
     if not isinstance(libs, list):
         return
+
     missing = [lib for lib in libs if isinstance(lib, str) and lib and not _native_lib_installed(lib)]
     if not missing:
         return
@@ -459,6 +490,7 @@ def _maybe_run_install_hint(pkg_name: str, pkg_manifest: dict) -> None:
     plat = _platform_key()
     cmd = install.get(plat) if isinstance(install, dict) else None
     hint = native.get("install_hint") if isinstance(native, dict) else None
+
     if cmd:
         print(f"native library for `{pkg_name}` appears missing: {', '.join(missing)}")
         print(f"suggested install command ({plat}): {cmd}")
@@ -478,6 +510,7 @@ def _maybe_run_install_hint(pkg_name: str, pkg_manifest: dict) -> None:
         if run_it:
             subprocess.run(cmd, shell=True, check=False)
         return
+
     if isinstance(hint, str) and hint.strip():
         print(f"native library for `{pkg_name}` appears missing: {', '.join(missing)}")
         print(hint.strip())
@@ -495,6 +528,7 @@ def _write_lock(data: dict[str, str]) -> None:
     for name, constraint in resolve(data).items():
         c = constraint.strip() or "*"
         constraints.setdefault(name, []).append(c)
+
     queue = list(sorted(constraints.keys()))
     seen: set[str] = set()
 
@@ -507,6 +541,7 @@ def _write_lock(data: dict[str, str]) -> None:
         ver = ""
         source = ""
         checksum = ""
+
         if registry:
             try:
                 ver, meta = _resolve_from_registry_many(name, reqs, registry)
@@ -514,6 +549,7 @@ def _write_lock(data: dict[str, str]) -> None:
                 checksum = str(meta.get("checksum", "")).strip()
             except Exception:
                 ver = ""
+
         if not ver:
             # Offline/legacy fallback keeps deterministic shape for direct constraints.
             if len(reqs) == 1 and _is_semver(reqs[0]):
@@ -531,6 +567,7 @@ def _write_lock(data: dict[str, str]) -> None:
                 pkg_dir = _ensure_package_installed(name, ver, source)
             except Exception:
                 pkg_dir = None
+
         if checksum == "" and pkg_dir is not None and pkg_dir.exists():
             checksum = f"sha256:{_dir_digest(pkg_dir)}"
 
@@ -545,6 +582,7 @@ def _write_lock(data: dict[str, str]) -> None:
 
         if pkg_dir is None or not pkg_dir.exists():
             continue
+
         pkg_manifest = _load_package_manifest(pkg_dir)
         subdeps = _package_manifest_deps(pkg_manifest)
         for dep_name, dep_constraint in sorted(subdeps.items()):
@@ -569,6 +607,7 @@ def _cmd_new(name: str) -> None:
     root = Path(name)
     if root.exists():
         raise ValueError(_diag(f"destination `{name}` already exists"))
+
     (root / "src").mkdir(parents=True)
     (root / "Astra.toml").write_text(
         "[project]\n"
@@ -603,7 +642,6 @@ def _cmd_add(pkg: str, ver: str | None) -> None:
     version, meta = _resolve_from_registry(pkg, "*", registry)
     repo = str(meta.get("repo", "")).strip()
     checksum = str(meta.get("checksum", "")).strip()
-
     pkg_dir = _ensure_package_installed(pkg, version, repo)
     pkg_manifest = _load_package_manifest(pkg_dir)
     _maybe_run_install_hint(pkg, pkg_manifest)
@@ -632,14 +670,17 @@ def _cmd_list() -> None:
     if not root.exists():
         print("no packages installed")
         return
+
     rows: list[str] = []
     for pkg_dir in sorted([p for p in root.iterdir() if p.is_dir()]):
         versions = sorted([p.name for p in pkg_dir.iterdir() if p.is_dir()], reverse=True)
         if versions:
             rows.append(f"{pkg_dir.name} {versions[0]}")
+
     if not rows:
         print("no packages installed")
         return
+
     for row in rows:
         print(row)
 
@@ -659,9 +700,11 @@ def _cmd_search(query: str) -> None:
         if versions:
             ver = sorted(versions.keys(), key=_semver_sort_key, reverse=True)[0]
         rows.append((name, ver, desc))
+
     if not rows:
         print("no packages found")
         return
+
     for name, ver, desc in rows:
         print(f"{name} {ver} - {desc}")
 
@@ -671,6 +714,7 @@ def _cmd_update() -> None:
     if not data["deps"]:
         print("no dependencies to update")
         return
+
     registry = _fetch_registry()
     changed = 0
     for name in sorted(data["deps"].keys()):
@@ -687,6 +731,7 @@ def _cmd_update() -> None:
             continue
         _ensure_package_installed(name, latest, repo)
         changed += 1
+
     _write_manifest(data)
     _write_lock(data["deps"])
     print(f"updated {changed} package(s)")
@@ -695,14 +740,17 @@ def _cmd_update() -> None:
 def _cmd_publish() -> None:
     if not MANIFEST.exists():
         raise ValueError(_diag("Astra.toml not found in current directory"))
+
     data = tomllib.loads(MANIFEST.read_text())
     pkg = data.get("package", {})
     if not isinstance(pkg, dict):
         raise ValueError(_diag("package manifest must contain a [package] table"))
+
     name = pkg.get("name")
     version = pkg.get("version")
     if not isinstance(name, str) or not isinstance(version, str):
         raise ValueError(_diag("[package] must include string fields `name` and `version`"))
+
     print(f"package `{name}` ({version}) looks valid")
     print("next step:")
     print("1. push your package repository")
@@ -716,6 +764,7 @@ def _cmd_verify() -> None:
     if not isinstance(packages, dict):
         print("no lock metadata to verify")
         return
+
     checked = 0
     for name, meta in sorted(packages.items()):
         if not isinstance(meta, dict):
@@ -724,9 +773,11 @@ def _cmd_verify() -> None:
         checksum = str(meta.get("checksum", "")).strip()
         if not version or not checksum.startswith("sha256:"):
             continue
+
         pkg_dir = _package_home() / name / version
         if not pkg_dir.exists():
             raise ValueError(_diag(f"package `{name}` ({version}) not installed in package cache"))
+
         expected = checksum[len("sha256:") :].strip()
         actual = _dir_digest(pkg_dir)
         if expected and actual != expected:
@@ -734,6 +785,7 @@ def _cmd_verify() -> None:
                 _diag(f"integrity mismatch for `{name}` ({version}): expected sha256:{expected}, got sha256:{actual}")
             )
         checked += 1
+
     print(f"verified {checked} package(s)")
 
 
@@ -764,6 +816,7 @@ def main(argv=None):
     sp.add_parser("verify")
 
     ns = p.parse_args(argv)
+
     if ns.cmd == "init":
         _cmd_init(ns.name)
         return

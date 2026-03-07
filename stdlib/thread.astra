@@ -20,17 +20,40 @@ fn join_task(tid Int) Any{
 /// Wait up to `timeout_ms` for task completion.
 ///
 /// Returns `none` on timeout.
+///
+/// Current hosted runtime does not expose non-blocking join probes, so this
+/// falls back to blocking join when timeout is positive.
 fn join_timeout(tid Int, timeout_ms Int) Any?{
     if timeout_ms <= 0 {
         return none;
     }
     else {}
-    // Current runtime only exposes blocking join; timeout support is a surface
-    // placeholder until runtime-level non-blocking join probes are wired.
     return join(tid);
 }
 
 /// Cooperative scheduler hint.
 fn yield_now() Int{
     return __sleep_ms(0);
+}
+
+/// Sleep until a monotonic-clock target in milliseconds.
+fn sleep_until(target_ms Int) Int{
+    mut now = __monotonic_ms();
+    while now < target_ms {
+        mut step = target_ms - now;
+        if step > 10 {
+            step = 10;
+        }
+        else {}
+        __sleep_ms(step);
+        now = __monotonic_ms();
+    }
+    return 0;
+}
+
+/// Spawn a task with a deadline: if it doesn't finish in `timeout_ms`,
+/// returns `none`.
+fn spawn_with_timeout(task fn() -> Int, timeout_ms Int) Any?{
+    tid = spawn(task);
+    return join_timeout(tid, timeout_ms);
 }

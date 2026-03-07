@@ -552,6 +552,12 @@ GPU_ALLOWED_IN_KERNEL_BUILTINS: set[str] = {
     "ctz",
     "rotl",
     "rotr",
+    "vec_new",
+    "vec_from",
+    "vec_len",
+    "vec_get",
+    "vec_set",
+    "vec_push",
 }
 
 
