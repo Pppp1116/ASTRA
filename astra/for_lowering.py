@@ -91,7 +91,7 @@ def lower_for_loops(prog: Program) -> Program:
             st.body = _lower_block(st.body)
             return [st]
         if isinstance(st, MatchStmt):
-            st.arms = [(pat, _lower_block(body)) for (pat, body) in st.arms]
+            st.arms = [(pat, _lower_block(body) if isinstance(body, list) else body) for (pat, body) in st.arms]
             return [st]
         if isinstance(st, UnsafeStmt):
             st.body = _lower_block(st.body)

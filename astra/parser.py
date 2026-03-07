@@ -909,10 +909,6 @@ class Parser:
             e = self.parse_expr()
             self.eat(";")
             return DeferStmt(e, tok.pos, tok.line, tok.col)
-        if self.opt("drop"):
-            e = self.parse_expr()
-            self.eat(";")
-            return DropStmt(e, tok.pos, tok.line, tok.col)
         if self.opt("comptime"):
             body = self.parse_block()
             return ComptimeStmt(body, tok.pos, tok.line, tok.col)
@@ -924,11 +920,60 @@ class Parser:
                 else_body = self.parse_block()
             return IfStmt(cond, then_body, else_body, tok.pos, tok.line, tok.col)
         if self.opt("while"):
-            cond = self.parse_expr()
-            body = self.parse_block()
-            return WhileStmt(cond, body, tok.pos, tok.line, tok.col)
+            # Check for enhanced while loop with inline mutable variable
+            if self.opt("mut"):
+                if self.cur().kind == "IDENT":
+                    var_name = self.eat("IDENT").text
+                    condition = self.parse_expr()
+                    body = self.parse_block()
+                    # Create LetStmt for variable declaration
+                    var_decl = LetStmt(var_name, None, True, None, tok.pos, tok.line, tok.col)
+                    return EnhancedWhileStmt(var_decl, condition, body, tok.pos, tok.line, tok.col)
+                else:
+                    self._err("expected identifier after 'mut' in while condition")
+                    raise ParseError(self.errors[-1])
+            else:
+                # Regular while loop
+                cond = self.parse_expr()
+                body = self.parse_block()
+                return WhileStmt(cond, body, tok.pos, tok.line, tok.col)
         if self.opt("for"):
-            return self.parse_for(tok)
+            # Check for enhanced for loop with initialization
+            if self.opt("mut"):
+                if self.cur().kind == "IDENT":
+                    var_name = self.eat("IDENT").text
+                    self.eat("=")
+                    init_expr = self.parse_expr()
+                    self.eat(";")
+                    cond_expr = self.parse_expr()
+                    self.eat(";")
+                    # Parse step as assignment statement
+                    step_lhs = self.parse_expr()
+                    if self.cur().kind in ASSIGN_OPS:
+                        step_op = self.eat(self.cur().kind).kind
+                        step_rhs = self.parse_expr()
+                        step_expr = AssignStmt(step_lhs, step_op, step_rhs, tok.pos, tok.line, tok.col)
+                    else:
+                        self._err("expected assignment operator in for loop step")
+                        raise ParseError(self.errors[-1])
+                    body = self.parse_block()
+                    return EnhancedForStmt(var_name, init_expr, cond_expr, step_expr, body, tok.pos, tok.line, tok.col)
+                else:
+                    self._err("expected identifier after 'mut' in for loop")
+                    raise ParseError(self.errors[-1])
+            else:
+                # Check for iterator-style for loop
+                if self.cur().kind == "IDENT" and self.peek().kind == "in":
+                    var_name = self.eat("IDENT").text
+                    self.eat("in")
+                    iterable = self.parse_expr()
+                    body = self.parse_block()
+                    return IteratorForStmt(var_name, iterable, body, tok.pos, tok.line, tok.col)
+                else:
+                    # Fall back to existing for loop parsing
+                    return self.parse_for(tok)
+        if self.opt("try"):
+            return self.parse_try_catch(tok)
         if self.opt("match"):
             return self.parse_match(tok)
         if self.opt("unsafe"):
@@ -1013,13 +1058,21 @@ class Parser:
         """
         expr = self.parse_expr()
         self.eat("{")
-        arms: list[tuple[Any, list[Any]]] = []
+        arms: list[tuple[Any, Any]] = []
         while self.cur().kind != "}":
             pattern = self.parse_match_pattern()
             self.eat("=>")
-            body = self.parse_block()
-            arms.append((pattern, body))
-            self.opt(",")
+            # Check if it's a single expression or block
+            if self.cur().kind != "{":
+                # Single expression arm
+                expr_arm = self.parse_expr()
+                self.opt(",")
+                arms.append((pattern, expr_arm))
+            else:
+                # Block arm (existing behavior)
+                body = self.parse_block()
+                self.opt(",")
+                arms.append((pattern, body))
         self.eat("}")
         return MatchStmt(expr, arms, tok.pos, tok.line, tok.col)
 
@@ -1079,6 +1132,11 @@ class Parser:
         while self.opt("as"):
             tok = self.toks[self.i - 1]
             expr = CastExpr(expr, self.parse_type(), tok.pos, tok.line, tok.col)
+        
+        # Check for if expression (return if condition { true } else { false })
+        if self.opt("if") and self.cur().kind == "{":
+            return self.parse_if_expression(expr)
+        
         return expr
 
     def parse_unary(self):
@@ -1194,21 +1252,188 @@ class Parser:
                 if tok.text == "maxVal":
                     return MaxValTypeExpr(typ, tok.pos, tok.line, tok.col)
                 return MinValTypeExpr(typ, tok.pos, tok.line, tok.col)
-            return Name(tok.text, tok.pos, tok.line, tok.col)
-        if self.opt("["):
-            elems = []
-            if self.cur().kind != "]":
-                elems.append(self.parse_expr())
-                while self.opt(","):
-                    elems.append(self.parse_expr())
-            end = self.eat("]")
-            return ArrayLit(elems, end.pos, end.line, end.col)
+            
+            # Create name expression and check for method calls
+            name_expr = Name(tok.text, tok.pos, tok.line, tok.col)
+            return self.parse_method_call(name_expr)
+        # Check for if expression at the start of an expression
+        if self.opt("if"):
+            cond = self.parse_expr()
+            return self.parse_if_expression(cond)
+        
+        # Check for collection literals first
+        collection_lit = self.parse_collection_literal()
+        if collection_lit is not None:
+            return collection_lit
+        
         if self.opt("("):
             e = self.parse_expr()
             self.eat(")")
             return e
         self._err(f"unexpected atom {self.cur().kind}")
         raise ParseError(self.errors[-1])
+
+    def parse_try_catch(self, tok: Token) -> TryCatchStmt:
+        """Parse try-catch statement."""
+        self.eat("try")
+        try_body = self.parse_block()
+        
+        catch_handlers = []
+        while self.opt("catch"):
+            if self.cur().kind == "IDENT":
+                error_name = self.eat("IDENT").text
+                catch_body = self.parse_block()
+                catch_handlers.append((error_name, catch_body))
+            else:
+                self._err("expected error name after 'catch'")
+                raise ParseError(self.errors[-1])
+        
+        return TryCatchStmt(try_body, catch_handlers, tok.pos, tok.line, tok.col)
+
+    def parse_method_call(self, obj_expr: Any) -> Any:
+        """Parse method call syntax like obj.method(args)."""
+        if self.opt("."):
+            if self.cur().kind == "IDENT":
+                method_name = self.eat("IDENT").text
+                args = []
+                if self.opt("("):
+                    while self.cur().kind != ")":
+                        args.append(self.parse_expr())
+                        if not self.opt(","):
+                            break
+                    self.eat(")")
+                return MethodCall(obj_expr, method_name, args, obj_expr.pos, obj_expr.line, obj_expr.col)
+            else:
+                self._err("expected method name after '.'")
+                raise ParseError(self.errors[-1])
+        return obj_expr
+
+    def parse_collection_literal(self) -> Any:
+        """Parse collection literals like [1, 2, 3] or {k: v}."""
+        if self.opt("["):
+            elements = []
+            if self.cur().kind != "]":
+                elements.append(self.parse_expr())
+                while self.opt(","):
+                    elements.append(self.parse_expr())
+            end = self.eat("]")
+            return VectorLiteral(elements, end.pos, end.line, end.col)
+        
+        elif self.opt("{"):
+            # Check if this is a map literal (has key: value pairs)
+            if self.cur().kind != "}" and self._looks_like_map_pair():
+                # Map literal
+                pairs = []
+                if self.cur().kind != "}":
+                    key = self.parse_expr()
+                    self.eat(":")
+                    value = self.parse_expr()
+                    pairs.append((key, value))
+                    while self.opt(","):
+                        key = self.parse_expr()
+                        self.eat(":")
+                        value = self.parse_expr()
+                        pairs.append((key, value))
+                end = self.eat("}")
+                return MapLiteral(pairs, end.pos, end.line, end.col)
+            else:
+                # Set literal
+                elements = []
+                if self.cur().kind != "}":
+                    elements.append(self.parse_expr())
+                    while self.opt(","):
+                        elements.append(self.parse_expr())
+                end = self.eat("}")
+                return SetLiteral(elements, end.pos, end.line, end.col)
+        
+        return None
+    
+    def _looks_like_map_pair(self) -> bool:
+        """Check if the current position looks like the start of a map key: value pair."""
+        # Save current position
+        saved_i = self.i
+        
+        # Try to parse an expression
+        try:
+            key_expr = self.parse_expr()
+            if self.cur().kind == ":":
+                self.i = saved_i  # Restore position
+                return True
+        except:
+            pass
+        
+        # Restore position
+        self.i = saved_i
+        return False
+
+    def parse_struct_literal(self, struct_name: str) -> Any:
+        """Parse struct literal with positional arguments."""
+        if self.opt("("):
+            args = []
+            if self.cur().kind != ")":
+                args.append(self.parse_expr())
+                while self.opt(","):
+                    args.append(self.parse_expr())
+            end = self.eat(")")
+            return StructLiteral(struct_name, args, end.pos, end.line, end.col)
+        else:
+            # Fall back to existing field-based parsing
+            return None
+
+    def parse_destructuring_pattern(self) -> Any:
+        """Parse destructuring patterns like Point { x, y }."""
+        if self.cur().kind == "IDENT" and self.peek().kind == "{":
+            struct_name = self.eat("IDENT").text
+            self.eat("{")
+            fields = []
+            while self.cur().kind != "}":
+                if self.cur().kind == "IDENT":
+                    field_name = self.eat("IDENT").text
+                    if self.opt(":"):
+                        # Field binding with different name
+                        bind_name = self.eat("IDENT").text
+                        fields.append((field_name, bind_name))
+                    else:
+                        # Field binding with same name
+                        fields.append((field_name, field_name))
+                    self.opt(",")
+                else:
+                    self._err("expected field name in destructuring pattern")
+                    raise ParseError(self.errors[-1])
+            self.eat("}")
+            return DestructuringPattern(struct_name, fields, self.cur().pos, self.cur().line, self.cur().col)
+        return None
+
+    def parse_enhanced_match_pattern(self):
+        """Parse match pattern with optional guard clause."""
+        pattern = self.parse_match_pattern_atom()
+        patterns = [pattern]
+        
+        # Handle | alternatives
+        while self.opt("|"):
+            alt_pattern = self.parse_match_pattern_atom()
+            patterns.append(alt_pattern)
+        
+        # Handle guard clause
+        guard = None
+        if self.opt("if"):
+            guard = self.parse_expr()
+        
+        return EnhancedPattern(patterns, guard, self.cur().pos, self.cur().line, self.cur().col)
+
+    def parse_if_expression(self, cond: Any) -> Any:
+        """Parse if expression for use in expressions."""
+        self.eat("{")
+        then_expr = self.parse_expr()
+        self.eat("}")
+        self.eat("else")
+        if self.cur().kind == "{":
+            self.eat("{")
+            else_expr = self.parse_expr()
+            self.eat("}")
+        else:
+            else_expr = self.parse_unary()  # Parse a single expression
+        return IfExpression(cond, then_expr, else_expr, cond.pos, cond.line, cond.col)
 
 
 def parse(src: str, filename: str = "<input>"):

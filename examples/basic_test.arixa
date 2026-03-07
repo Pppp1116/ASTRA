@@ -1,0 +1,10 @@
+// Simple test of basic enhanced syntax
+fn main() Int {
+    mut i = 0;
+    while i < 5 {
+        print("Count: " + str.to_string_int(i));
+        i += 1;
+    }
+    
+    return 0;
+}

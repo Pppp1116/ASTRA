@@ -1,0 +1,7 @@
+// Test just enhanced for loop
+fn main() Int {
+    for mut i = 0; i < 3; i += 1 {
+        print("Iteration " + str.to_string_int(i));
+    }
+    return 0;
+}

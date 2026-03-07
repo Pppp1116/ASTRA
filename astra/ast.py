@@ -322,6 +322,166 @@ class WhileStmt:
 
 
 @dataclass
+class EnhancedWhileStmt:
+    """AST node representing enhanced while stmt with inline variable declaration.
+    
+    This type is part of Astra's public compiler/tooling surface.
+    """
+    var_decl: Any  # Variable declaration (LetStmt or None)
+    cond: Any      # Condition expression
+    body: list[Any]  # Loop body
+    pos: int = 0
+    line: int = 0
+    col: int = 0
+
+
+@dataclass
+class EnhancedForStmt:
+    """AST node representing enhanced for stmt with init, cond, step.
+    
+    This type is part of Astra's public compiler/tooling surface.
+    """
+    var_name: str      # Loop variable name
+    init_expr: Any     # Initialization expression
+    cond_expr: Any     # Condition expression
+    step_expr: Any     # Step expression
+    body: list[Any]    # Loop body
+    pos: int = 0
+    line: int = 0
+    col: int = 0
+
+
+@dataclass
+class IteratorForStmt:
+    """AST node representing iterator-style for loop.
+    
+    This type is part of Astra's public compiler/tooling surface.
+    """
+    var_name: str      # Iterator variable name
+    iterable: Any      # Iterable expression
+    body: list[Any]    # Loop body
+    pos: int = 0
+    line: int = 0
+    col: int = 0
+
+
+@dataclass
+class MethodCall:
+    """AST node representing method call.
+    
+    This type is part of Astra's public compiler/tooling surface.
+    """
+    obj: Any
+    method: str
+    args: list[Any]
+    pos: int = 0
+    line: int = 0
+    col: int = 0
+
+
+@dataclass
+class VectorLiteral:
+    """AST node representing vector literal.
+    
+    This type is part of Astra's public compiler/tooling surface.
+    """
+    elements: list[Any]
+    pos: int = 0
+    line: int = 0
+    col: int = 0
+
+
+@dataclass
+class MapLiteral:
+    """AST node representing map literal.
+    
+    This type is part of Astra's public compiler/tooling surface.
+    """
+    pairs: list[tuple[Any, Any]]
+    pos: int = 0
+    line: int = 0
+    col: int = 0
+
+
+@dataclass
+class SetLiteral:
+    """AST node representing set literal.
+    
+    This type is part of Astra's public compiler/tooling surface.
+    """
+    elements: list[Any]
+    pos: int = 0
+    line: int = 0
+    col: int = 0
+
+
+@dataclass
+class StructLiteral:
+    """AST node representing struct literal with positional arguments.
+    
+    This type is part of Astra's public compiler/tooling surface.
+    """
+    struct_name: str
+    args: list[Any]
+    pos: int = 0
+    line: int = 0
+    col: int = 0
+
+
+@dataclass
+class DestructuringPattern:
+    """AST node representing destructuring pattern.
+    
+    This type is part of Astra's public compiler/tooling surface.
+    """
+    struct_name: str
+    fields: list[tuple[str, str]]  # (field_name, bind_name)
+    pos: int = 0
+    line: int = 0
+    col: int = 0
+
+
+@dataclass
+class EnhancedPattern:
+    """AST node representing enhanced pattern with guards.
+    
+    This type is part of Astra's public compiler/tooling surface.
+    """
+    patterns: list[Any]
+    guard: Any  # Guard expression or None
+    pos: int = 0
+    line: int = 0
+    col: int = 0
+
+
+@dataclass
+class IfExpression:
+    """AST node representing if expression.
+    
+    This type is part of Astra's public compiler/tooling surface.
+    """
+    cond: Any
+    then_expr: Any
+    else_expr: Any
+    pos: int = 0
+    line: int = 0
+    col: int = 0
+
+
+@dataclass
+class TryCatchStmt:
+    """AST node representing try-catch statement.
+    
+    This type is part of Astra's public compiler/tooling surface.
+    """
+    try_body: list[Any]
+    catch_handlers: list[tuple[str, list[Any]]]  # (error_name, catch_body)
+    pos: int = 0
+    line: int = 0
+    col: int = 0
+
+
+@dataclass
 class ExprStmt:
     """AST node representing expr stmt.
     

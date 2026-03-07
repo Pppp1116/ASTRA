@@ -3,7 +3,7 @@
 ## Built-in Primitive Families
 
 - Integer: `Int`, `isize`, `usize`, plus `iN`/`uN` where `N` is `1..128`
-- Floating: `Float`, `f32`, `f64`
+- Floating: `Float`, `f64` (f32 is internal/backend-only)
 - Other: `Bool`, `String`, `Any`, `Void`, `Never`
 
 ## Compound and Generic Types

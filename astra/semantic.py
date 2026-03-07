@@ -27,9 +27,9 @@ def _diag(filename: str, line: int, col: int, msg: str) -> str:
     return f"SEM {filename}:{line}:{col}: {msg}"
 
 
-FLOAT_TYPES = {"f32", "f64"}
-PRIMITIVES = {"Int", "isize", "usize", "Float", "f32", "f64", "String", "str", "Bool", "Any", "Void", "Never", "Bytes"}
-COPY_SCALAR_TYPES = {"Float", "f32", "f64", "Bool"}
+FLOAT_TYPES = {"f64"}
+PRIMITIVES = {"Int", "isize", "usize", "Float", "f64", "String", "str", "Bool", "Any", "Void", "Never", "Bytes"}
+COPY_SCALAR_TYPES = {"Float", "f64", "Bool"}
 NONE_LIT_TYPE = "<none>"
 _TRAIT_IMPLS_STACK: list[dict[str, set[str]]] = [{}]
 _KNOWN_TRAITS_STACK: list[set[str]] = [set()]
@@ -2193,8 +2193,14 @@ def _has_value_return(body: list[Any]) -> bool:
             return True
         if isinstance(st, MatchStmt):
             for _, arm in st.arms:
-                if _has_value_return(arm):
-                    return True
+                if isinstance(arm, list):
+                    # Block body
+                    if _has_value_return(arm):
+                        return True
+                else:
+                    # Expression body - expressions don't contain return statements
+                    # So they don't have value returns in the same way
+                    pass
     return False
 
 
@@ -3192,26 +3198,35 @@ def _check_stmt(
                         raise SemanticError(_diag(filename, alt_pat.line, alt_pat.col, f"duplicate pattern binding {bname}"))
                     arm_scopes[-1][bname] = bty
                     arm_mut_scopes[-1][bname] = False
-            _check_block(
-                body,
-                arm_scopes,
-                arm_mut_scopes,
-                arm_borrow_scopes,
-                arm_move_scopes,
-                fn_groups,
-                structs,
-                enums,
-                fn_ret,
-                ref_param_names,
-                owned.copy(),
-                borrow.copy(),
-                move.copy(),
-                filename,
-                fn_name,
-                loop_depth,
-                unsafe_ok,
-                gpu_kernel,
-            )
+            
+            # Handle both block bodies and expression bodies (enhanced match)
+            if isinstance(body, list):
+                # Block body (existing behavior)
+                _check_block(
+                    body,
+                    arm_scopes,
+                    arm_mut_scopes,
+                    arm_borrow_scopes,
+                    arm_move_scopes,
+                    fn_groups,
+                    structs,
+                    enums,
+                    fn_ret,
+                    ref_param_names,
+                    owned.copy(),
+                    borrow.copy(),
+                    move.copy(),
+                    filename,
+                    fn_name,
+                    loop_depth,
+                    unsafe_ok,
+                    gpu_kernel,
+                )
+            else:
+                # Expression body (enhanced match)
+                body_ty = _infer(body, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok, gpu_kernel)
+                # For match expressions, we don't require a specific return type
+                # The match expression itself will have a type inferred from its arms
         if subject_ty == "Bool" and not seen_catch_all and seen_bool != {True, False}:
             raise SemanticError(_diag(filename, st.line, st.col, "non-exhaustive match for Bool"))
         if subject_enum_decl is not None and not seen_catch_all:
@@ -3267,6 +3282,103 @@ def _check_stmt(
                 raise SemanticError(_diag(filename, st.line, st.col, "free() expects a named owner"))
             owned.free(ptr.value, Span.at(filename, st.line, st.col))
         return
+    
+    # Enhanced syntax semantic analysis
+    if isinstance(st, EnhancedWhileStmt):
+        # Analyze variable declaration
+        if st.var_decl:
+            _check_stmt(st.var_decl, scopes, mut_scopes, borrow_scopes, move_scopes, fn_groups, structs, enums, fn_ret, ref_param_names, owned, borrow, move, filename, fn_name, loop_depth, unsafe_ok, gpu_kernel)
+        
+        # Analyze condition
+        cond_ty = _infer(st.cond, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok, gpu_kernel)
+        _require_type(filename, st.line, st.col, "Bool", cond_ty, "enhanced while condition")
+        
+        # Analyze body
+        loop_owned = owned.copy()
+        loop_borrow = borrow.enter()
+        loop_move = move.enter()
+        _check_block(st.body, scopes, mut_scopes, [loop_borrow], [loop_move], fn_groups, structs, enums, fn_ret, ref_param_names, loop_owned, borrow, move, filename, fn_name, loop_depth + 1, unsafe_ok, gpu_kernel)
+        borrow.merge(borrow, loop_borrow)
+        move.merge(move, loop_move)
+        return
+    
+    if isinstance(st, EnhancedForStmt):
+        # Create scope for loop variable first (needed for step expression)
+        loop_scope = {}
+        loop_mut_scope = {}
+        
+        # Infer initialization type
+        init_ty = _infer(st.init_expr, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok, gpu_kernel)
+        
+        # Add loop variable to scope before analyzing step expression
+        loop_scope[st.var_name] = init_ty
+        loop_mut_scope[st.var_name] = True  # Loop variables are mutable
+        scopes.append(loop_scope)
+        mut_scopes.append(loop_mut_scope)
+        
+        # Analyze condition
+        cond_ty = _infer(st.cond_expr, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok, gpu_kernel)
+        _require_type(filename, st.line, st.col, "Bool", cond_ty, "enhanced for condition")
+        
+        # Analyze step (now has access to loop variable)
+        _check_stmt(st.step_expr, scopes, mut_scopes, borrow_scopes, move_scopes, fn_groups, structs, enums, fn_ret, ref_param_names, owned, borrow, move, filename, fn_name, loop_depth, unsafe_ok, gpu_kernel)
+        
+        # Analyze body
+        loop_owned = owned.copy()
+        loop_scopes = scopes + [{}]
+        loop_mut_scopes = mut_scopes + [{}]
+        loop_borrow = borrow.copy()
+        loop_move = move.copy()
+        loop_borrow_scopes = borrow_scopes + [set()]
+        loop_move_scopes = move_scopes + [{}]
+        _check_block(st.body, loop_scopes, loop_mut_scopes, loop_borrow_scopes, loop_move_scopes, fn_groups, structs, enums, fn_ret, ref_param_names, loop_owned, loop_borrow, loop_move, filename, fn_name, loop_depth + 1, unsafe_ok, gpu_kernel)
+        
+        scopes.pop()
+        mut_scopes.pop()
+        borrow.merge(borrow, loop_borrow)
+        move.merge(move, loop_move)
+        return
+    
+    if isinstance(st, IteratorForStmt):
+        # Analyze iterable
+        iterable_ty = _infer(st.iterable, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok, gpu_kernel)
+        
+        # Extract element type from iterable (simplified)
+        # This would need more sophisticated type analysis in practice
+        element_ty = "Int"  # Placeholder - would extract from Vec<T>, etc.
+        
+        # Create scope for iterator variable
+        loop_scope = {st.var_name: element_ty}
+        scopes.append(loop_scope)
+        
+        # Analyze body
+        loop_owned = owned.copy()
+        loop_borrow = borrow.enter()
+        loop_move = move.enter()
+        _check_block(st.body, scopes, mut_scopes, [loop_borrow], [loop_move], fn_groups, structs, enums, fn_ret, ref_param_names, loop_owned, borrow, move, filename, fn_name, loop_depth + 1, unsafe_ok, gpu_kernel)
+        
+        scopes.pop()
+        borrow.merge(borrow, loop_borrow)
+        move.merge(move, loop_move)
+        return
+    
+    if isinstance(st, TryCatchStmt):
+        # Analyze try body
+        try_owned = owned.copy()
+        try_borrow = borrow.enter()
+        try_move = move.enter()
+        _check_block(st.try_body, scopes, mut_scopes, [try_borrow], [try_move], fn_groups, structs, enums, fn_ret, ref_param_names, try_owned, borrow, move, filename, fn_name, loop_depth, unsafe_ok, gpu_kernel)
+        
+        # Analyze catch handlers
+        for error_name, catch_body in st.catch_handlers:
+            catch_scope = {error_name: "String"}  # Error type
+            scopes.append(catch_scope)
+            _check_block(catch_body, scopes, mut_scopes, [try_borrow], [try_move], fn_groups, structs, enums, fn_ret, ref_param_names, try_owned, borrow, move, filename, fn_name, loop_depth, unsafe_ok, gpu_kernel)
+            scopes.pop()
+        
+        return
+    
+    raise SemanticError(_diag(filename, st.line, st.col, f"unsupported statement type: {type(st).__name__}"))
 
 
 def _infer(
@@ -3654,6 +3766,97 @@ def _infer(
             ety = _infer(fexpr, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok, gpu_kernel)
             _require_type(filename, getattr(fexpr, "line", e.line), getattr(fexpr, "col", e.col), fty, ety, f"field {fname} of {e.name}")
         return _typed(e, e.name)
+    
+    # Enhanced syntax expression inference
+    if isinstance(e, MethodCall):
+        # Infer object type
+        obj_ty = _infer(e.obj, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok, gpu_kernel)
+        
+        # For now, treat method calls as regular function calls
+        # In a full implementation, this would look up methods on the object type
+        arg_types = []
+        for arg in e.args:
+            arg_ty = _infer(arg, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok, gpu_kernel)
+            arg_types.append(arg_ty)
+        
+        # Return Any for now - would be resolved in full method resolution
+        return _typed(e, "Any")
+    
+    if isinstance(e, VectorLiteral):
+        if not e.elements:
+            return _typed(e, "Vec<Any>")
+        
+        # Infer element type from first element
+        element_ty = _infer(e.elements[0], scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok, gpu_kernel)
+        
+        # Check all elements have same type
+        for element in e.elements[1:]:
+            el_ty = _infer(element, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok, gpu_kernel)
+            _require_type(filename, element.line, element.col, element_ty, el_ty, "vector element")
+        
+        return _typed(e, f"Vec<{element_ty}>")
+    
+    if isinstance(e, MapLiteral):
+        if not e.pairs:
+            return _typed(e, "Map<Any, Any>")
+        
+        # Infer key and value types from first pair
+        key_ty, val_ty = _infer(e.pairs[0][0], scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok, gpu_kernel), \
+                      _infer(e.pairs[0][1], scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok, gpu_kernel)
+        
+        # Check all pairs have consistent types
+        for key, value in e.pairs[1:]:
+            k_ty = _infer(key, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok, gpu_kernel)
+            v_ty = _infer(value, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok, gpu_kernel)
+            _require_type(filename, key.line, key.col, key_ty, k_ty, "map key")
+            _require_type(filename, value.line, value.col, val_ty, v_ty, "map value")
+        
+        return _typed(e, f"Map<{key_ty}, {val_ty}>")
+    
+    if isinstance(e, SetLiteral):
+        if not e.elements:
+            return _typed(e, "Set<Any>")
+        
+        # Infer element type from first element
+        element_ty = _infer(e.elements[0], scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok, gpu_kernel)
+        
+        # Check all elements have same type
+        for element in e.elements[1:]:
+            el_ty = _infer(element, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok, gpu_kernel)
+            _require_type(filename, element.line, element.col, element_ty, el_ty, "set element")
+        
+        return _typed(e, f"Set<{element_ty}>")
+    
+    if isinstance(e, StructLiteral):
+        # Check if struct exists
+        decl = structs.get(e.struct_name)
+        if decl is None:
+            raise SemanticError(_diag(filename, e.line, e.col, f"undefined struct {e.struct_name}"))
+        
+        if len(e.args) != len(decl.fields):
+            raise SemanticError(_diag(filename, e.line, e.col, f"struct {e.struct_name} expects {len(decl.fields)} arguments, got {len(e.args)}"))
+        
+        # Check argument types against field types
+        for i, (arg, (field_name, field_ty)) in enumerate(zip(e.args, decl.fields)):
+            arg_ty = _infer(arg, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok, gpu_kernel)
+            _require_type(filename, arg.line, arg.col, field_ty, arg_ty, f"field {field_name} of struct {e.struct_name}")
+        
+        return _typed(e, e.struct_name)
+    
+    if isinstance(e, IfExpression):
+        # Infer condition type
+        cond_ty = _infer(e.cond, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok, gpu_kernel)
+        _require_type(filename, e.cond.line, e.cond.col, "Bool", cond_ty, "if expression condition")
+        
+        # Infer then and else branches
+        then_ty = _infer(e.then_expr, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok, gpu_kernel)
+        else_ty = _infer(e.else_expr, scopes, mut_scopes, fn_groups, structs, enums, owned, borrow, move, filename, fn_name, unsafe_ok, gpu_kernel)
+        
+        # Require branches to have same type
+        _require_type(filename, e.else_expr.line, e.else_expr.col, then_ty, else_ty, "if expression branches")
+        
+        return _typed(e, then_ty)
+    
     return _typed(e, "Any")
 
 

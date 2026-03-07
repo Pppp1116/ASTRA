@@ -36,6 +36,9 @@ KEYWORDS = {
     "as",
     "sizeof",
     "alignof",
+    "step",
+    "try",
+    "catch",
 }
 
 MULTI_TOKENS = [
