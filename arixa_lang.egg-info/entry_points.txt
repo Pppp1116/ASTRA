@@ -1,0 +1,9 @@
+[console_scripts]
+ardbg = astra.debugger:main
+ardoc = astra.docgen:main
+arfmt = astra.formatter:main
+arixa = astra.cli:main
+arlint = astra.linter:main
+arlsp = astra.lsp:main
+arpm = astra.pkg:main
+arprof = astra.profiler:main

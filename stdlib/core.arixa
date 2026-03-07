@@ -106,3 +106,69 @@ fn shr_checked(a Int, n Int) Int? {
     else {}
     return a >> n;
 }
+
+/// Count the number of set bits in `x`.
+fn popcount(x Int) Int {
+    mut count = 0;
+    mut value = x;
+    while value != 0 {
+        count += value & 1;
+        value = value >> 1;
+    }
+    return count;
+}
+
+/// Count leading zero bits in `x`.
+fn leading_zeros(x Int) Int {
+    if x == 0 {
+        return bitSizeOf(Int);
+    }
+    else {}
+    mut count = 0;
+    mut mask = 1 << (bitSizeOf(Int) - 1);
+    while (x & mask) == 0 && count < bitSizeOf(Int) {
+        count += 1;
+        mask = mask >> 1;
+    }
+    return count;
+}
+
+/// Count trailing zero bits in `x`.
+fn trailing_zeros(x Int) Int {
+    if x == 0 {
+        return bitSizeOf(Int);
+    }
+    else {}
+    mut count = 0;
+    mut current = x;
+    while (current & 1) == 0 && count < bitSizeOf(Int) {
+        count += 1;
+        current = current >> 1;
+    }
+    return count;
+}
+
+/// Rotate `x` left by `n` bits.
+fn rotl(x Int, n Int) Int {
+    shift = n % bitSizeOf(Int);
+    return (x << shift) | (x >> (bitSizeOf(Int) - shift));
+}
+
+/// Rotate `x` right by `n` bits.
+fn rotr(x Int, n Int) Int {
+    shift = n % bitSizeOf(Int);
+    return (x >> shift) | (x << (bitSizeOf(Int) - shift));
+}
+
+/// Reverse the byte order of `x`.
+fn swap_bytes(x Int) Int {
+    mut result = 0;
+    mut i = 0;
+    mut current = x;
+    while i < bitSizeOf(Int) {
+        result = (result << 8) | (current & 0xFF);
+        current = current >> 8;
+        i += 8;
+    }
+    return result;
+}

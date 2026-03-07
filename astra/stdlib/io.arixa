@@ -61,7 +61,7 @@ fn print_str(x String) Void{
     return;
 }
 
-/// Print any value using its JSON representation (including Option and
+/// Print any value using its JSON representation (including nullable and
 /// container types).
 fn print_any(v Any) Void{
     print(__to_json(v));
